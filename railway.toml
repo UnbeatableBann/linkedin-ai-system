@@ -1,0 +1,60 @@
+# railway.toml — Railway deployment configuration
+# Deploy all three services from one repo.
+#
+# In Railway dashboard:
+# 1. Create project → Deploy from GitHub
+# 2. Railway auto-detects this file and creates the services
+# 3. Add Redis service (Railway managed Redis)
+# 4. Set all env vars from your .env file in each service's Variables tab
+
+[build]
+builder = "DOCKERFILE"
+dockerfilePath = "Dockerfile"
+target = "prod"
+
+# ── API service ────────────────────────────────────────────────────────────
+[[services]]
+name = "api"
+source = "."
+
+[services.build]
+builder = "DOCKERFILE"
+dockerfilePath = "Dockerfile"
+target = "prod"
+
+[services.deploy]
+startCommand = "uvicorn app.main:app --host 0.0.0.0 --port $PORT --workers 2"
+healthcheckPath = "/health"
+healthcheckTimeout = 10
+restartPolicyType = "ON_FAILURE"
+restartPolicyMaxRetries = 3
+
+# ── Celery worker ──────────────────────────────────────────────────────────
+[[services]]
+name = "worker"
+source = "."
+
+[services.build]
+builder = "DOCKERFILE"
+dockerfilePath = "Dockerfile"
+target = "prod"
+
+[services.deploy]
+startCommand = "celery -A app.scheduler.celery_app worker --loglevel=info --concurrency=4 --queues=generation,publishing,default"
+restartPolicyType = "ON_FAILURE"
+restartPolicyMaxRetries = 5
+
+# ── Celery Beat scheduler ──────────────────────────────────────────────────
+[[services]]
+name = "beat"
+source = "."
+
+[services.build]
+builder = "DOCKERFILE"
+dockerfilePath = "Dockerfile"
+target = "prod"
+
+[services.deploy]
+startCommand = "celery -A app.scheduler.celery_app beat --loglevel=info --scheduler celery.beat.PersistentScheduler --schedule /tmp/celerybeat-schedule"
+restartPolicyType = "ON_FAILURE"
+restartPolicyMaxRetries = 3

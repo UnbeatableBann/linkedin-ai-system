@@ -1,0 +1,72 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.backends.legacy:build"
+
+[project]
+name = "linkedin-ai-system"
+version = "1.0.0"
+requires-python = ">=3.12"
+dependencies = [
+    # Web framework
+    "fastapi==0.115.5",
+    "uvicorn[standard]==0.32.1",
+    "python-multipart==0.0.12",
+
+    # Task queue
+    "celery[redis]==5.4.0",
+    "redis==5.2.0",
+
+    # Database
+    "supabase==2.10.0",
+    "asyncpg==0.30.0",
+
+    # LLM providers
+    "anthropic==0.40.0",
+    "openai==1.57.0",
+    "groq==0.13.0",
+
+    # Config & validation
+    "pydantic==2.10.3",
+    "pydantic-settings==2.6.1",
+
+    # Security
+    "cryptography==44.0.0",
+
+    # Date/time parsing
+    "python-dateutil==2.9.0",
+    "pytz==2024.2",
+    "dateparser==1.2.0",
+
+    # Utilities
+    "tenacity==9.0.0",
+    "structlog==24.4.0",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest==8.3.4",
+    "pytest-asyncio==0.24.0",
+    "pytest-mock==3.14.0",
+    "httpx==0.28.0",
+    "ruff==0.8.3",
+    "mypy==1.13.0",
+]
+
+[tool.ruff]
+line-length = 100
+target-version = "py312"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "N", "W", "UP"]
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+testpaths = ["tests"]
+
+[tool.mypy]
+python_version = "3.12"
+strict = true
+ignore_missing_imports = true
+
+[tool.setuptools.packages.find]
+where = ["src"]

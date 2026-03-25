@@ -1,0 +1,48 @@
+# render.yaml — Render deployment configuration
+# Deploy all three services from one repo.
+#
+# Instructions:
+# 1. Connect your GitHub repo in Render dashboard
+# 2. Render detects this file and creates the services automatically
+# 3. Create a Redis instance in Render and copy the URL to REDIS_URL env var
+
+services:
+  # ── FastAPI API ────────────────────────────────────────────────────────
+  - type: web
+    name: linkedin-ai-api
+    runtime: docker
+    dockerfilePath: ./Dockerfile
+    dockerContext: .
+    dockerCommand: "uvicorn app.main:app --host 0.0.0.0 --port $PORT --workers 2"
+    plan: starter
+    healthCheckPath: /health
+    envVars:
+      - key: APP_ENV
+        value: production
+      - key: LOG_LEVEL
+        value: INFO
+      # All other env vars set manually in Render dashboard
+
+  # ── Celery Worker ──────────────────────────────────────────────────────
+  - type: worker
+    name: linkedin-ai-worker
+    runtime: docker
+    dockerfilePath: ./Dockerfile
+    dockerContext: .
+    dockerCommand: "celery -A app.scheduler.celery_app worker --loglevel=info --concurrency=4 --queues=generation,publishing,default"
+    plan: starter
+    envVars:
+      - key: APP_ENV
+        value: production
+
+  # ── Celery Beat ────────────────────────────────────────────────────────
+  - type: worker
+    name: linkedin-ai-beat
+    runtime: docker
+    dockerfilePath: ./Dockerfile
+    dockerContext: .
+    dockerCommand: "celery -A app.scheduler.celery_app beat --loglevel=info --scheduler celery.beat.PersistentScheduler --schedule /tmp/celerybeat-schedule"
+    plan: starter
+    envVars:
+      - key: APP_ENV
+        value: production
