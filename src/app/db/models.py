@@ -60,6 +60,7 @@ class LLMProvider(StrEnum):
     ANTHROPIC = "anthropic"
     OPENAI = "openai"
     GROQ = "groq"
+    GEMINI = "gemini"
 
 
 # ── Table models ───────────────────────────────────────────────────────────

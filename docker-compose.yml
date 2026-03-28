@@ -1,5 +1,3 @@
-version: "3.9"
-
 # ─────────────────────────────────────────────────────────────────────────────
 # LinkedIn AI Content System — Docker Compose (local dev)
 #
@@ -49,15 +47,15 @@ services:
       - CELERY_BROKER_URL=redis://redis:6379/0
       - CELERY_RESULT_BACKEND=redis://redis:6379/1
     volumes:
-      - .:/app  # Hot reload: mount source code
-    command: uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload
+      - ./src:/app/src    # Hot reload: mount source code
+    command: uv run uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload
     depends_on:
       redis:
         condition: service_healthy
     restart: unless-stopped
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
-      interval: 15s
+      interval: 40s
       timeout: 5s
       retries: 3
 
@@ -74,9 +72,9 @@ services:
       - CELERY_BROKER_URL=redis://redis:6379/0
       - CELERY_RESULT_BACKEND=redis://redis:6379/1
     volumes:
-      - .:/app
+      - ./src:/app/src
     command: >
-      celery -A app.scheduler.celery_app worker
+      uv run celery -A app.scheduler.celery_app worker
       --loglevel=info
       --concurrency=4
       --queues=generation,publishing,default
@@ -98,9 +96,9 @@ services:
       - CELERY_BROKER_URL=redis://redis:6379/0
       - CELERY_RESULT_BACKEND=redis://redis:6379/1
     volumes:
-      - .:/app
+      - ./src:/app/src
     command: >
-      celery -A app.scheduler.celery_app beat
+      uv run celery -A app.scheduler.celery_app beat
       --loglevel=info
       --scheduler celery.beat.PersistentScheduler
       --schedule /tmp/celerybeat-schedule
@@ -111,3 +109,4 @@ services:
 
 volumes:
   redis_data:
+  uv_cache:

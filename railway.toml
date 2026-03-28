@@ -23,7 +23,7 @@ dockerfilePath = "Dockerfile"
 target = "prod"
 
 [services.deploy]
-startCommand = "uvicorn app.main:app --host 0.0.0.0 --port $PORT --workers 2"
+startCommand = "uv run uvicorn app.main:app --host 0.0.0.0 --port $PORT --workers 2"
 healthcheckPath = "/health"
 healthcheckTimeout = 10
 restartPolicyType = "ON_FAILURE"
@@ -40,7 +40,7 @@ dockerfilePath = "Dockerfile"
 target = "prod"
 
 [services.deploy]
-startCommand = "celery -A app.scheduler.celery_app worker --loglevel=info --concurrency=4 --queues=generation,publishing,default"
+startCommand = "uv run celery -A app.scheduler.celery_app worker --loglevel=info --concurrency=4 --queues=generation,publishing,default"
 restartPolicyType = "ON_FAILURE"
 restartPolicyMaxRetries = 5
 
@@ -55,6 +55,6 @@ dockerfilePath = "Dockerfile"
 target = "prod"
 
 [services.deploy]
-startCommand = "celery -A app.scheduler.celery_app beat --loglevel=info --scheduler celery.beat.PersistentScheduler --schedule /tmp/celerybeat-schedule"
+startCommand = "uv run celery -A app.scheduler.celery_app beat --loglevel=info --scheduler celery.beat.PersistentScheduler --schedule /tmp/celerybeat-schedule"
 restartPolicyType = "ON_FAILURE"
 restartPolicyMaxRetries = 3

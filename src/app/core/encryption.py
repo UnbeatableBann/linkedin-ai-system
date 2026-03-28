@@ -51,3 +51,8 @@ def decrypt(token: str) -> str:
 
 class EncryptionError(Exception):
     """Raised when decryption fails due to key mismatch or corruption."""
+
+#TODO:
+# 1. Key rotation is not handled
+# 2. No TTL / expiration use
+# 3. It is not production-grade for key lifecycle management

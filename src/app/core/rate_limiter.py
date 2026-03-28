@@ -78,6 +78,7 @@ async def check_rate_limit(user_id: str, limit_type: LimitType) -> None:
 async def _check(user_id: str, limit_type: LimitType) -> None:
     """Inner check — may raise Redis errors (caller handles)."""
     import redis.asyncio as aioredis
+
     from app.config import get_settings
 
     settings = get_settings()
@@ -121,3 +122,5 @@ async def _sliding_window(
         next_window = (window_start + 1) * window_seconds
         retry_after = max(1, next_window - int(time.time()))
         raise RateLimitExceeded(LimitType(prefix), retry_after)
+
+# TODO: Exception name `RateLimitExceeded` should be named with an Error suffix

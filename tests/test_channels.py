@@ -6,14 +6,14 @@ Tests for channel adapters — signature verification and message parsing.
 No network calls — all pure unit tests.
 """
 
-import hashlib
-import hmac
 
 import pytest
+import httpx
 
 from app.channels.base import MessageType
 from app.channels.telegram import (
     _split_message,
+    _should_retry_without_parse_mode,
     parse_telegram_update,
     verify_telegram_signature,
 )
@@ -21,9 +21,7 @@ from app.channels.whatsapp import (
     _strip_markdown,
     parse_whatsapp_payload,
     verify_whatsapp_challenge,
-    verify_whatsapp_signature,
 )
-
 
 # ── Telegram ───────────────────────────────────────────────────────────────
 
@@ -196,6 +194,32 @@ class TestTelegramSplit:
         original_words = text.split()
         reconstructed_words = reconstructed.split()
         assert len(reconstructed_words) >= len(original_words) - 5  # Allow small diff
+
+    def test_single_long_line_hard_split(self):
+        text = "x" * 10000
+        chunks = _split_message(text, 4096)
+        assert len(chunks) == 3
+        assert all(len(chunk) <= 4096 for chunk in chunks)
+        assert "".join(chunks) == text
+
+
+class TestTelegramMarkdownFallback:
+    def _make_exc(self, status_code: int, description: str) -> httpx.HTTPStatusError:
+        req = httpx.Request("POST", "https://api.telegram.org/bot123/sendMessage")
+        resp = httpx.Response(status_code, request=req, json={"description": description})
+        return httpx.HTTPStatusError("boom", request=req, response=resp)
+
+    def test_retries_without_parse_mode_on_400_markdown_payload(self):
+        exc = self._make_exc(400, "Bad Request: can't parse entities")
+        assert _should_retry_without_parse_mode(exc, {"parse_mode": "Markdown"}) is True
+
+    def test_retries_without_parse_mode_on_any_400_markdown_payload(self):
+        exc = self._make_exc(400, "Bad Request: chat not found")
+        assert _should_retry_without_parse_mode(exc, {"parse_mode": "Markdown"}) is True
+
+    def test_non_400_does_not_retry_without_parse_mode(self):
+        exc = self._make_exc(429, "Too Many Requests")
+        assert _should_retry_without_parse_mode(exc, {"parse_mode": "Markdown"}) is False
 
 
 # ── WhatsApp ───────────────────────────────────────────────────────────────

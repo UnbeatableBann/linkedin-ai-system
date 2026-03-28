@@ -13,6 +13,7 @@ Register it in your Zernio dashboard under Settings → Webhooks.
 """
 
 from fastapi import APIRouter, Request, status
+
 from app.core.logging import get_logger
 
 router = APIRouter()
@@ -57,16 +58,15 @@ async def zernio_webhook(request: Request) -> dict:
     return {"ok": True}
 
 
-async def _handle_zernio_event(
-    event: str, zernio_post_id: str, post_data: dict
-) -> None:
-    from datetime import datetime, timezone
+async def _handle_zernio_event(event: str, zernio_post_id: str, post_data: dict) -> None:
+    from datetime import datetime
+
     from app.db.client import get_db
 
-    db = get_db()
+    db = await get_db()
 
     # Find our post by zernio_post_id
-    result = (
+    result = await (
         db.table("posts")
         .select("id, user_id, status")
         .eq("zernio_post_id", zernio_post_id)
@@ -74,11 +74,8 @@ async def _handle_zernio_event(
         .execute()
     )
 
-    if not result.data:
-        logger.warning(
-            "zernio_webhook.post_not_found",
-            zernio_post_id=zernio_post_id
-        )
+    if not result or not result.data:
+        logger.warning("zernio_webhook.post_not_found", zernio_post_id=zernio_post_id)
         return
 
     post = result.data
@@ -86,41 +83,46 @@ async def _handle_zernio_event(
     user_id = post["user_id"]
 
     if event == "post.published":
-        published_at = post_data.get("publishedAt") or datetime.now(timezone.utc).isoformat()
-        db.table("posts").update(
-            {"status": "published", "published_at": published_at}
-        ).eq("id", post_id).execute()
+        published_at = post_data.get("publishedAt") or datetime.now(datetime.UTC).isoformat()
+        await (
+            db.table("posts")
+            .update({"status": "published", "published_at": published_at})
+            .eq("id", post_id)
+            .execute()
+        )
         logger.info("zernio_webhook.post_published", post_id=post_id)
 
     elif event == "post.failed":
         error_msg = post_data.get("error", "Unknown error from Zernio")
-        db.table("posts").update(
-            {"status": "failed", "metadata": {"zernio_error": error_msg}}
-        ).eq("id", post_id).execute()
+        await (
+            db.table("posts")
+            .update({"status": "failed", "metadata": {"zernio_error": error_msg}})
+            .eq("id", post_id)
+            .execute()
+        )
         logger.warning("zernio_webhook.post_failed", post_id=post_id, error=error_msg)
 
         # Notify the user
         await _notify_user_of_failure(user_id, post_id, error_msg)
 
     elif event == "post.cancelled":
-        db.table("posts").update({"status": "cancelled"}).eq("id", post_id).execute()
+        await db.table("posts").update({"status": "cancelled"}).eq("id", post_id).execute()
         logger.info("zernio_webhook.post_cancelled", post_id=post_id)
 
 
 async def _notify_user_of_failure(user_id: str, post_id: str, error: str) -> None:
     """Send a failure notification back to the user via their channel."""
     from app.db.client import get_db
-    from app.db.models import UserRow
 
-    db = get_db()
-    result = (
+    db = await get_db()
+    result = await (
         db.table("users")
         .select("channel, channel_user_id")
         .eq("id", user_id)
         .maybe_single()
         .execute()
     )
-    if not result.data:
+    if not result or not result.data:
         return
 
     user_data = result.data
@@ -129,9 +131,11 @@ async def _notify_user_of_failure(user_id: str, post_id: str, error: str) -> Non
 
     if channel == "telegram":
         from app.channels.telegram import TelegramSender
+
         sender = TelegramSender()
     else:
         from app.channels.whatsapp import WhatsAppSender
+
         sender = WhatsAppSender()
 
     await sender.send_text(

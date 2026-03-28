@@ -13,7 +13,7 @@ services:
     runtime: docker
     dockerfilePath: ./Dockerfile
     dockerContext: .
-    dockerCommand: "uvicorn app.main:app --host 0.0.0.0 --port $PORT --workers 2"
+    dockerCommand: "uv run uvicorn app.main:app --host 0.0.0.0 --port $PORT --workers 2"
     plan: starter
     healthCheckPath: /health
     envVars:
@@ -29,7 +29,7 @@ services:
     runtime: docker
     dockerfilePath: ./Dockerfile
     dockerContext: .
-    dockerCommand: "celery -A app.scheduler.celery_app worker --loglevel=info --concurrency=4 --queues=generation,publishing,default"
+    dockerCommand: "uv run celery -A app.scheduler.celery_app worker --loglevel=info --concurrency=4 --queues=generation,publishing,default"
     plan: starter
     envVars:
       - key: APP_ENV
@@ -41,7 +41,7 @@ services:
     runtime: docker
     dockerfilePath: ./Dockerfile
     dockerContext: .
-    dockerCommand: "celery -A app.scheduler.celery_app beat --loglevel=info --scheduler celery.beat.PersistentScheduler --schedule /tmp/celerybeat-schedule"
+    dockerCommand: "uv run celery -A app.scheduler.celery_app beat --loglevel=info --scheduler celery.beat.PersistentScheduler --schedule /tmp/celerybeat-schedule"
     plan: starter
     envVars:
       - key: APP_ENV

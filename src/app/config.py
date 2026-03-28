@@ -84,7 +84,8 @@ class Settings(BaseSettings):
         except Exception as exc:
             raise ValueError(
                 "FERNET_SECRET_KEY is invalid. "
-                "Generate one with: python -c \"from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())\""
+                "Generate one with: "
+                'python -c "from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())"'
             ) from exc
         return v
 
@@ -110,9 +111,7 @@ class Settings(BaseSettings):
         if self.app_env == AppEnv.PRODUCTION:
             # In production, make sure callback URL is HTTPS
             if not self.oauth_callback_base_url.startswith("https://"):
-                raise ValueError(
-                    "OAUTH_CALLBACK_BASE_URL must use HTTPS in production"
-                )
+                raise ValueError("OAUTH_CALLBACK_BASE_URL must use HTTPS in production")
         return self
 
     @property

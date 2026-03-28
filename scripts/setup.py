@@ -126,7 +126,7 @@ def main() -> None:
     heading("Next Steps")
     print("1. Run your Supabase migrations:")
     print("   → Open Supabase Dashboard → SQL Editor")
-    print(f"   → Copy and run: {ROOT}/app/db/migrations/001_initial.sql\n")
+    print(f"   → Copy and run: {ROOT}/src/app/db/migrations/001_initial.sql\n")
     print("2. Start the system:")
     print("   docker-compose up --build\n")
     print("3. Register Telegram webhook (after docker-compose is running):")

@@ -10,6 +10,8 @@ This endpoint just acknowledges the callback — the actual polling happens
 in the onboarding conversation handler.
 """
 
+from uuid import UUID
+
 from fastapi import APIRouter, Query
 from fastapi.responses import HTMLResponse
 
@@ -22,6 +24,9 @@ logger = get_logger(__name__)
 @router.get("/oauth/callback")
 async def oauth_callback(
     connect_token: str | None = Query(default=None),
+    profile_id: str | None = Query(default=None, alias="profileId"),
+    account_id: str | None = Query(default=None, alias="accountId"),
+    username: str | None = Query(default=None),
     error: str | None = Query(default=None),
 ) -> HTMLResponse:
     """
@@ -45,13 +50,19 @@ async def oauth_callback(
         return HTMLResponse(content=html, status_code=400)
 
     if connect_token:
-        logger.info("oauth.callback.success")
+        logger.info(
+            "oauth.callback.success",
+            profile_id=profile_id,
+            account_id=account_id,
+            username=username,
+        )
+        await _auto_continue_onboarding(profile_id, connect_token, account_id, username)
         html = _page(
             title="LinkedIn Connected!",
             emoji="✅",
             message="Your LinkedIn account has been successfully authorised.",
             detail="",
-            instruction="Go back to Telegram or WhatsApp and send any message to continue setup.",
+            instruction="Go back to Telegram or WhatsApp. If your bot session is still open, it should continue automatically.",
         )
         return HTMLResponse(content=html, status_code=200)
 
@@ -95,3 +106,84 @@ def _page(title: str, emoji: str, message: str, detail: str, instruction: str) -
   </div>
 </body>
 </html>"""
+
+
+async def _auto_continue_onboarding(
+    profile_id: str | None,
+    connect_token: str,
+    account_id: str | None = None,
+    username: str | None = None,
+) -> None:
+    """Continue onboarding automatically after the browser callback, when possible."""
+    if not profile_id:
+        logger.warning("oauth.callback.missing_profile_id")
+        return
+
+    from app.conversation.onboarding import (
+        _complete_linkedin_account_connection,
+        _continue_linkedin_onboarding,
+    )
+    from app.db.client import get_db
+    from app.db.models import UserRow
+    from app.session.models import OnboardingStep, SessionState
+    from app.session.store import get_or_create_session, save_session
+
+    db = await get_db()
+    user_result = await (
+        db.table("users")
+        .select("*")
+        .eq("zernio_profile_id", profile_id)
+        .eq("is_active", True)
+        .maybe_single()
+        .execute()
+    )
+    if not user_result or not user_result.data:
+        logger.warning("oauth.callback.user_not_found", profile_id=profile_id)
+        return
+
+    user = UserRow(**user_result.data)
+    session = await get_or_create_session(UUID(str(user.id)))
+    sender = _get_sender(user.channel.value)
+
+    session.state = SessionState.ONBOARDING
+    session.context.onboarding_step = OnboardingStep.LINKEDIN_OAUTH
+    session.context.connect_token = connect_token
+
+    try:
+        if account_id:
+            await _complete_linkedin_account_connection(
+                session,
+                user,
+                sender,
+                user.channel_user_id,
+                account_id,
+                username,
+            )
+        else:
+            await _continue_linkedin_onboarding(
+                session,
+                user,
+                sender,
+                user.channel_user_id,
+                connect_token,
+            )
+        await save_session(session)
+    except Exception as exc:
+        logger.error(
+            "oauth.callback.auto_continue_failed",
+            profile_id=profile_id,
+            user_id=str(user.id),
+            error=str(exc),
+        )
+
+
+def _get_sender(channel: str) -> object:
+    if channel == "telegram":
+        from app.channels.telegram import TelegramSender
+
+        return TelegramSender()
+    if channel == "whatsapp":
+        from app.channels.whatsapp import WhatsAppSender
+
+        return WhatsAppSender()
+    raise ValueError(f"Unknown channel: {channel}")

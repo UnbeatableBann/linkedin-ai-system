@@ -13,7 +13,6 @@ Key constraints handled here:
 
 import hashlib
 import hmac
-import json
 from typing import Any
 
 import httpx
@@ -37,11 +36,14 @@ def verify_whatsapp_signature(body: bytes, signature_header: str | None) -> bool
     if not signature_header or not signature_header.startswith("sha256="):
         return False
 
-    expected = "sha256=" + hmac.new(
-        settings.whatsapp_app_secret.encode(),
-        body,
-        hashlib.sha256,
-    ).hexdigest()
+    expected = (
+        "sha256="
+        + hmac.new(
+            settings.whatsapp_app_secret.encode(),
+            body,
+            hashlib.sha256,
+        ).hexdigest()
+    )
 
     return hmac.compare_digest(signature_header, expected)
 
@@ -55,8 +57,11 @@ def verify_whatsapp_challenge(
     Handle Meta's webhook verification GET request.
     Returns the challenge string if verification passes, else None.
     """
+    if mode != "subscribe" or not token or challenge is None:
+        return None
+
     settings = get_settings()
-    if mode == "subscribe" and token == settings.whatsapp_verify_token:
+    if token == settings.whatsapp_verify_token:
         return challenge
     return None
 
@@ -91,7 +96,9 @@ def parse_whatsapp_payload(payload: dict[str, Any]) -> NormalisedMessage | None:
         message = messages[0]
 
         if message.get("type") != "text":
-            logger.debug("whatsapp.parse.skip", reason="non-text message type", type=message.get("type"))
+            logger.debug(
+                "whatsapp.parse.skip", reason="non-text message type", type=message.get("type")
+            )
             return None
 
         phone_number = message["from"]
@@ -197,8 +204,7 @@ class WhatsAppSender(BaseChannelSender):
             return
 
         wa_buttons = [
-            {"type": "reply", "reply": {"id": data, "title": label[:20]}}
-            for label, data in buttons
+            {"type": "reply", "reply": {"id": data, "title": label[:20]}} for label, data in buttons
         ]
         payload = {
             "messaging_product": "whatsapp",
@@ -251,10 +257,11 @@ def _split_message(text: str, max_len: int) -> list[str]:
 def _strip_markdown(text: str) -> str:
     """Remove common Markdown formatting for WhatsApp plain text."""
     import re
+
     text = re.sub(r"\*\*(.*?)\*\*", r"\1", text)  # **bold**
-    text = re.sub(r"\*(.*?)\*", r"\1", text)       # *italic*
-    text = re.sub(r"`(.*?)`", r"\1", text)          # `code`
-    text = re.sub(r"_(.*?)_", r"\1", text)          # _italic_
+    text = re.sub(r"\*(.*?)\*", r"\1", text)  # *italic*
+    text = re.sub(r"`(.*?)`", r"\1", text)  # `code`
+    text = re.sub(r"_(.*?)_", r"\1", text)  # _italic_
     return text
 
 
@@ -279,6 +286,8 @@ async def _post_with_retry(
             return
         except httpx.HTTPStatusError as exc:
             if attempt == max_retries - 1:
-                logger.error("whatsapp.send.failed", error=str(exc), status=exc.response.status_code)
+                logger.error(
+                    "whatsapp.send.failed", error=str(exc), status=exc.response.status_code
+                )
                 raise
             await asyncio.sleep(2**attempt)

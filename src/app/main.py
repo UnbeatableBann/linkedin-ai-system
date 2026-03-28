@@ -17,7 +17,6 @@ from contextlib import asynccontextmanager
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
-from scalar_fastapi import get_scalar_api_reference
 
 from app.config import get_settings
 from app.core.logging import get_logger, setup_logging
@@ -81,6 +80,8 @@ def create_app() -> FastAPI:
     if not settings.is_production:
         @app.get("/scalar", include_in_schema=False)
         async def scalar_docs():
+            from scalar_fastapi import get_scalar_api_reference
+
             return get_scalar_api_reference(
                 openapi_url=app.openapi_url,
                 title=app.title,

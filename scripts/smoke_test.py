@@ -23,7 +23,7 @@ from pathlib import Path
 from unittest.mock import AsyncMock, MagicMock, patch
 
 ROOT = Path(__file__).parent.parent
-sys.path.insert(0, str(ROOT))
+sys.path.insert(0, str(ROOT / "src"))
 
 # ── Stubs for packages not in this test environment ───────────────────────
 import types

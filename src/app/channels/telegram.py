@@ -10,7 +10,6 @@ Responsibilities:
   - Respect Telegram's 4096 char limit and 1 msg/s flood control
 """
 
-import hashlib
 import hmac
 from typing import Any
 
@@ -130,15 +129,49 @@ class TelegramSender(BaseChannelSender):
         chunks = _split_message(text, TELEGRAM_MAX_MESSAGE_LENGTH)
         async with httpx.AsyncClient(timeout=10.0) as client:
             for chunk in chunks:
-                await _post_with_retry(
-                    client,
-                    f"{self._base_url}/sendMessage",
-                    {
-                        "chat_id": channel_user_id,
-                        "text": chunk,
-                        "parse_mode": "Markdown",
-                    },
-                )
+                payload = {
+                    "chat_id": channel_user_id,
+                    "text": chunk,
+                    "parse_mode": "Markdown",
+                }
+                try:
+                    await _post_with_retry(
+                        client,
+                        f"{self._base_url}/sendMessage",
+                        payload,
+                    )
+                except httpx.HTTPStatusError as exc:
+                    if not _should_retry_without_parse_mode(exc, payload):
+                        raise
+
+                    logger.warning(
+                        "telegram.send.markdown_fallback",
+                        chat_id=channel_user_id,
+                        status=exc.response.status_code,
+                    )
+                    plain_payload = dict(payload)
+                    plain_payload.pop("parse_mode", None)
+                    try:
+                        await _post_with_retry(
+                            client,
+                            f"{self._base_url}/sendMessage",
+                            plain_payload,
+                        )
+                    except httpx.HTTPStatusError as plain_exc:
+                        logger.error(
+                            "telegram.send.plain_fallback_failed",
+                            chat_id=channel_user_id,
+                            status=plain_exc.response.status_code,
+                            description=_extract_telegram_error_description(plain_exc.response),
+                        )
+                        await _post_with_retry(
+                            client,
+                            f"{self._base_url}/sendMessage",
+                            {
+                                "chat_id": channel_user_id,
+                                "text": "I could not render one of my messages. Please send any message to continue.",
+                            },
+                        )
 
     async def send_buttons(
         self,
@@ -155,16 +188,75 @@ class TelegramSender(BaseChannelSender):
             "inline_keyboard": [[{"text": label, "callback_data": data}] for label, data in buttons]
         }
         async with httpx.AsyncClient(timeout=10.0) as client:
-            await _post_with_retry(
-                client,
-                f"{self._base_url}/sendMessage",
-                {
-                    "chat_id": channel_user_id,
-                    "text": text,
-                    "parse_mode": "Markdown",
-                    "reply_markup": keyboard,
-                },
-            )
+            payload = {
+                "chat_id": channel_user_id,
+                "text": text,
+                "parse_mode": "Markdown",
+                "reply_markup": keyboard,
+            }
+            try:
+                await _post_with_retry(
+                    client,
+                    f"{self._base_url}/sendMessage",
+                    payload,
+                )
+            except httpx.HTTPStatusError as exc:
+                if not _should_retry_without_parse_mode(exc, payload):
+                    raise
+
+                logger.warning(
+                    "telegram.send_buttons.markdown_fallback",
+                    chat_id=channel_user_id,
+                    status=exc.response.status_code,
+                )
+                plain_payload = dict(payload)
+                plain_payload.pop("parse_mode", None)
+                await _post_with_retry(
+                    client,
+                    f"{self._base_url}/sendMessage",
+                    plain_payload,
+                )
+
+    async def send_url_button(
+        self,
+        channel_user_id: str,
+        text: str,
+        label: str,
+        url: str,
+    ) -> None:
+        """Send a message with a single URL button."""
+        keyboard = {
+            "inline_keyboard": [[{"text": label, "url": url}]]
+        }
+        async with httpx.AsyncClient(timeout=10.0) as client:
+            payload = {
+                "chat_id": channel_user_id,
+                "text": text,
+                "parse_mode": "Markdown",
+                "reply_markup": keyboard,
+            }
+            try:
+                await _post_with_retry(
+                    client,
+                    f"{self._base_url}/sendMessage",
+                    payload,
+                )
+            except httpx.HTTPStatusError as exc:
+                if not _should_retry_without_parse_mode(exc, payload):
+                    raise
+
+                logger.warning(
+                    "telegram.send_url_button.markdown_fallback",
+                    chat_id=channel_user_id,
+                    status=exc.response.status_code,
+                )
+                plain_payload = dict(payload)
+                plain_payload.pop("parse_mode", None)
+                await _post_with_retry(
+                    client,
+                    f"{self._base_url}/sendMessage",
+                    plain_payload,
+                )
 
     async def send_typing(self, channel_user_id: str) -> None:
         """Show 'typing...' indicator while the LLM is generating."""
@@ -193,22 +285,31 @@ class TelegramSender(BaseChannelSender):
 
 
 def _split_message(text: str, max_len: int) -> list[str]:
-    """Split a long message at newlines to stay within Telegram's limit."""
+    """Split text into chunks that never exceed Telegram's max message length."""
     if len(text) <= max_len:
         return [text]
 
     chunks: list[str] = []
-    current = ""
-    for line in text.splitlines(keepends=True):
-        if len(current) + len(line) > max_len:
-            if current:
-                chunks.append(current.rstrip())
-            current = line
+    remaining = text
+    soft_cut_threshold = max_len // 2
+
+    while len(remaining) > max_len:
+        window = remaining[:max_len]
+        cut = window.rfind("\n")
+        if cut >= soft_cut_threshold:
+            chunk = remaining[:cut]
+            remaining = remaining[cut + 1 :]
         else:
-            current += line
-    if current:
-        chunks.append(current.rstrip())
-    return chunks or [text[:max_len]]
+            chunk = window
+            remaining = remaining[max_len:]
+
+        if chunk:
+            chunks.append(chunk)
+
+    if remaining:
+        chunks.append(remaining)
+
+    return chunks
 
 
 async def _post_with_retry(
@@ -234,7 +335,54 @@ async def _post_with_retry(
             resp.raise_for_status()
             return
         except httpx.HTTPStatusError as exc:
+            status_code = exc.response.status_code
+            if 400 <= status_code < 500 and status_code != 429:
+                log_fn = logger.error
+                event = "telegram.send.client_error"
+                if _is_markdown_entity_error(exc, payload):
+                    log_fn = logger.warning
+                    event = "telegram.send.markdown_entity_error"
+
+                log_fn(
+                    event,
+                    error=str(exc),
+                    url=url,
+                    description=_extract_telegram_error_description(exc.response),
+                    payload_len=len(str(payload.get("text", ""))),
+                    parse_mode=payload.get("parse_mode"),
+                )
+                raise
             if attempt == max_retries - 1:
                 logger.error("telegram.send.failed", error=str(exc), url=url)
                 raise
             await asyncio.sleep(2**attempt)
+
+
+def _should_retry_without_parse_mode(
+    exc: httpx.HTTPStatusError,
+    payload: dict[str, Any],
+) -> bool:
+    """Retry once as plain text when Markdown-formatted sends fail with 400."""
+    return bool(payload.get("parse_mode")) and exc.response.status_code == 400
+
+
+def _is_markdown_entity_error(
+    exc: httpx.HTTPStatusError,
+    payload: dict[str, Any],
+) -> bool:
+    """Detect Telegram markdown parsing failures that should be treated as recoverable."""
+    return (
+        bool(payload.get("parse_mode"))
+        and exc.response.status_code == 400
+        and "can't parse entities" in _extract_telegram_error_description(exc.response).lower()
+    )
+
+
+def _extract_telegram_error_description(response: httpx.Response) -> str:
+    """Best-effort parse of Telegram error detail for diagnostics."""
+    try:
+        body = response.json()
+    except Exception:
+        return response.text[:300]
+
+    return str(body.get("description", "")).strip()[:300]

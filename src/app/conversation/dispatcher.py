@@ -13,10 +13,12 @@ For every inbound message it:
 This module never contains business logic — it only routes.
 """
 
+import inspect
 from uuid import UUID
 
 from app.channels.base import NormalisedMessage
 from app.core.logging import get_logger
+from app.core.rate_limiter import LimitType, RateLimitExceeded, check_rate_limit
 from app.db.client import get_db
 from app.db.models import UserRow
 from app.session.fsm import Event
@@ -44,10 +46,8 @@ async def dispatch(user_id: UUID, msg: NormalisedMessage) -> None:
 
     # ── Rate limiting ───────────────────────────────────────────────────────
     try:
-        from app.core.rate_limiter import LimitType, RateLimitExceeded, check_rate_limit
         await check_rate_limit(str(user_id), LimitType.MESSAGE)
     except Exception as rate_exc:
-        from app.core.rate_limiter import RateLimitExceeded
         if isinstance(rate_exc, RateLimitExceeded):
             await sender.send_text(msg.channel_user_id, rate_exc.user_message())
             return
@@ -283,8 +283,8 @@ async def _handle_timezone(
     import pytz
     try:
         pytz.timezone(tz_arg)  # Validate
-        db = get_db()
-        db.table("users").update({"timezone": tz_arg}).eq("id", str(user.id)).execute()
+        db = await get_db()
+        await db.table("users").update({"timezone": tz_arg}).eq("id", str(user.id)).execute()
         await sender.send_text(msg.channel_user_id, f"Timezone updated to *{tz_arg}*. ✓")
     except pytz.exceptions.UnknownTimeZoneError:
         await sender.send_text(
@@ -320,16 +320,20 @@ async def _handle_delete(
         return
 
     # User confirmed — proceed with soft deletion
-    db = get_db()
+    db = await get_db()
     user_id = str(user.id)
 
     # 1. Cancel all pending schedule jobs
-    db.table("schedule_jobs").update(
-        {"status": "cancelled"}
-    ).eq("user_id", user_id).eq("status", "pending").execute()
+    await _maybe_await(
+        db.table("schedule_jobs")
+        .update({"status": "cancelled"})
+        .eq("user_id", user_id)
+        .eq("status", "pending")
+        .execute()
+    )
 
     # 2. Cancel scheduled posts in Zernio if possible
-    scheduled_posts = (
+    scheduled_posts = await _maybe_await(
         db.table("posts")
         .select("id, zernio_post_id")
         .eq("user_id", user_id)
@@ -345,22 +349,31 @@ async def _handle_delete(
                     await client.cancel_post(post["zernio_post_id"])
                 except Exception:
                     pass  # Best-effort cancellation
-        db.table("posts").update({"status": "cancelled"}).eq(
-            "user_id", user_id
-        ).eq("status", "scheduled").execute()
+        await _maybe_await(
+            db.table("posts")
+            .update({"status": "cancelled"})
+            .eq("user_id", user_id)
+            .eq("status", "scheduled")
+            .execute()
+        )
 
     # 3. Clear encrypted credentials (GDPR: wipe sensitive data)
-    db.table("users").update(
-        {
-            "is_active": False,
-            "zernio_api_key_enc": None,
-            "zernio_profile_id": None,
-            "zernio_account_id": None,
-            "llm_api_key_enc": None,
-            "llm_provider": None,
-            "llm_model": None,
-        }
-    ).eq("id", user_id).execute()
+    await _maybe_await(
+        db.table("users")
+        .update(
+            {
+                "is_active": False,
+                "zernio_api_key_enc": None,
+                "zernio_profile_id": None,
+                "zernio_account_id": None,
+                "llm_api_key_enc": None,
+                "llm_provider": None,
+                "llm_model": None,
+            }
+        )
+        .eq("id", user_id)
+        .execute()
+    )
 
     # 4. Clear session
     session.state = SessionState.IDLE
@@ -383,8 +396,8 @@ async def _handle_drafts(
     /drafts — list the user's recent posts with their statuses.
     Shows last 5 posts across all statuses: draft, scheduled, published, failed.
     """
-    db = get_db()
-    result = (
+    db = await get_db()
+    result = await (
         db.table("posts")
         .select("id, content, status, scheduled_for, published_at, created_at")
         .eq("user_id", str(user.id))
@@ -393,7 +406,7 @@ async def _handle_drafts(
         .execute()
     )
 
-    if not result.data:
+    if not result or not result.data:
         await sender.send_text(
             msg.channel_user_id,
             "You don't have any posts yet.\n\nSend me a topic to write your first one!",
@@ -456,8 +469,8 @@ def _get_sender(channel: str) -> object:
 
 
 async def _load_user(user_id: UUID) -> UserRow | None:
-    db = get_db()
-    result = (
+    db = await get_db()
+    result = await (
         db.table("users")
         .select("*")
         .eq("id", str(user_id))
@@ -465,6 +478,12 @@ async def _load_user(user_id: UUID) -> UserRow | None:
         .maybe_single()
         .execute()
     )
-    if not result.data:
+    if not result or not result.data:
         return None
     return UserRow(**result.data)
+
+
+async def _maybe_await(value):
+    if inspect.isawaitable(value):
+        return await value
+    return value

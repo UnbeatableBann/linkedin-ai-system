@@ -15,6 +15,7 @@ Tasks:
 """
 
 import asyncio
+import atexit
 from datetime import datetime, timedelta, timezone
 from typing import Any
 from uuid import UUID
@@ -26,14 +27,48 @@ from app.scheduler.celery_app import celery_app
 
 logger = get_task_logger(__name__)
 
+_worker_loop: asyncio.AbstractEventLoop | None = None
+
+
+def _get_worker_loop() -> asyncio.AbstractEventLoop:
+    """Return a process-local loop reused across sync Celery task invocations."""
+    global _worker_loop
+    if _worker_loop is None or _worker_loop.is_closed():
+        _worker_loop = asyncio.new_event_loop()
+    return _worker_loop
+
+
+def _shutdown_worker_loop() -> None:
+    """Close the shared worker loop cleanly when the worker process exits."""
+    global _worker_loop
+    if _worker_loop is None or _worker_loop.is_closed():
+        return
+
+    pending = asyncio.all_tasks(_worker_loop)
+    for task in pending:
+        task.cancel()
+    if pending:
+        _worker_loop.run_until_complete(asyncio.gather(*pending, return_exceptions=True))
+
+    _worker_loop.run_until_complete(_worker_loop.shutdown_asyncgens())
+    _worker_loop.close()
+    _worker_loop = None
+
+
+atexit.register(_shutdown_worker_loop)
+
 
 def run_async(coro):
     """Run an async coroutine from a synchronous Celery task."""
-    loop = asyncio.new_event_loop()
     try:
-        return loop.run_until_complete(coro)
-    finally:
-        loop.close()
+        asyncio.get_running_loop()
+    except RuntimeError:
+        pass
+    else:
+        raise RuntimeError("run_async() cannot be called from an active event loop")
+
+    loop = _get_worker_loop()
+    return loop.run_until_complete(coro)
 
 
 # ── Content Generation ─────────────────────────────────────────────────────
@@ -64,8 +99,16 @@ def generate_post_task(
     """
     run_async(
         _generate_post_async(
-            user_id, session_id, channel, channel_user_id,
-            topic, tone, audience, length_pref, style_prefs, self,
+            user_id,
+            session_id,
+            channel,
+            channel_user_id,
+            topic,
+            tone,
+            audience,
+            length_pref,
+            style_prefs,
+            self,
         )
     )
 
@@ -90,12 +133,12 @@ async def _generate_post_async(
     from app.session.models import SessionState
     from app.session.store import get_or_create_session, save_session
 
-    db = get_db()
+    db = await get_db()
     sender = _get_sender(channel)
 
     try:
         # Load user and session
-        user_row = db.table("users").select("*").eq("id", user_id).single().execute()
+        user_row = await db.table("users").select("*").eq("id", user_id).single().execute()
         user = UserRow(**user_row.data)
         session = await get_or_create_session(UUID(user_id))
 
@@ -120,7 +163,10 @@ async def _generate_post_async(
 
         # Send draft to user
         from app.conversation.reviewing import present_draft
-        await sender.send_text(channel_user_id, present_draft(content, session.context.draft_version))
+
+        await sender.send_text(
+            channel_user_id, present_draft(content, session.context.draft_version)
+        )
 
         # Process any pending message that arrived during generation
         if session.context.pending_message:
@@ -129,8 +175,9 @@ async def _generate_post_async(
             await save_session(session)
             logger.info("tasks.generate.processing_pending_message", user_id=user_id)
             # Dispatch the queued message through reviewing
+            from app.channels.base import MessageType, NormalisedMessage
             from app.conversation.reviewing import handle_reviewing
-            from app.channels.base import NormalisedMessage, MessageType
+
             pending_msg = NormalisedMessage(
                 channel=channel,
                 channel_user_id=channel_user_id,
@@ -181,8 +228,14 @@ def refine_post_task(
 ) -> None:
     run_async(
         _refine_post_async(
-            user_id, session_id, channel, channel_user_id,
-            current_draft, edit_instruction, style_prefs, self,
+            user_id,
+            session_id,
+            channel,
+            channel_user_id,
+            current_draft,
+            edit_instruction,
+            style_prefs,
+            self,
         )
     )
 
@@ -205,11 +258,11 @@ async def _refine_post_async(
     from app.session.models import SessionState
     from app.session.store import get_or_create_session, save_session
 
-    db = get_db()
+    db = await get_db()
     sender = _get_sender(channel)
 
     try:
-        user_row = db.table("users").select("*").eq("id", user_id).single().execute()
+        user_row = await db.table("users").select("*").eq("id", user_id).single().execute()
         user = UserRow(**user_row.data)
         session = await get_or_create_session(UUID(user_id))
 
@@ -229,15 +282,20 @@ async def _refine_post_async(
         session.context.pending_message = None
         await save_session(session)
 
-        await sender.send_text(channel_user_id, present_draft(refined, session.context.draft_version))
+        await sender.send_text(
+            channel_user_id, present_draft(refined, session.context.draft_version)
+        )
 
         if pending:
+            from app.channels.base import MessageType, NormalisedMessage
             from app.conversation.reviewing import handle_reviewing
-            from app.channels.base import NormalisedMessage, MessageType
+
             pending_msg = NormalisedMessage(
-                channel=channel, channel_user_id=channel_user_id,
+                channel=channel,
+                channel_user_id=channel_user_id,
                 message_id=f"pending_refine_{session_id}",
-                text=pending, message_type=MessageType.TEXT,
+                text=pending,
+                message_type=MessageType.TEXT,
             )
             await handle_reviewing(session, user, sender, pending_msg)
             await save_session(session)
@@ -288,14 +346,14 @@ async def _publish_scheduled_async(
     from app.db.models import UserRow
     from app.zernio.client import ZernioClient, ZernioError
 
-    db = get_db()
+    db = await get_db()
     sender = _get_sender(channel)
 
     try:
         # Load user and post
-        user_row = db.table("users").select("*").eq("id", user_id).single().execute()
+        user_row = await db.table("users").select("*").eq("id", user_id).single().execute()
         user = UserRow(**user_row.data)
-        post_row = db.table("posts").select("*").eq("id", post_id).single().execute()
+        post_row = await db.table("posts").select("*").eq("id", post_id).single().execute()
         post = post_row.data
 
         if post["status"] in ("published", "cancelled"):
@@ -303,15 +361,16 @@ async def _publish_scheduled_async(
             return
 
         # Mark as running
-        db.table("posts").update({"status": "scheduled"}).eq("id", post_id).execute()
+        await db.table("posts").update({"status": "scheduled"}).eq("id", post_id).execute()
 
         # Check LinkedIn token health before attempting publish
         from app.zernio.health import assert_account_healthy
+
         try:
             await assert_account_healthy(user)
         except ZernioError as health_exc:
             await sender.send_text(channel_user_id, str(health_exc))
-            db.table("posts").update({"status": "failed"}).eq("id", post_id).execute()
+            await db.table("posts").update({"status": "failed"}).eq("id", post_id).execute()
             return
 
         api_key = decrypt(user.zernio_api_key_enc)
@@ -327,18 +386,22 @@ async def _publish_scheduled_async(
         )
 
         # Update post with Zernio ID and published status
-        db.table("posts").update(
-            {
-                "status": "published",
-                "zernio_post_id": zernio_post.id,
-                "published_at": datetime.now(timezone.utc).isoformat(),
-            }
-        ).eq("id", post_id).execute()
+        await (
+            db.table("posts")
+            .update(
+                {
+                    "status": "published",
+                    "zernio_post_id": zernio_post.id,
+                    "published_at": datetime.now(timezone.utc).isoformat(),
+                }
+            )
+            .eq("id", post_id)
+            .execute()
+        )
 
         await sender.send_text(
             channel_user_id,
-            f"✅ *Published!* Your LinkedIn post is now live.\n\n"
-            f"_{post['content'][:80]}..._",
+            f"✅ *Published!* Your LinkedIn post is now live.\n\n" f"_{post['content'][:80]}..._",
         )
 
     except Exception as exc:
@@ -348,10 +411,13 @@ async def _publish_scheduled_async(
         if attempts <= len(delays):
             raise task.retry(exc=exc, countdown=delays[attempts - 1])
         else:
-            db = get_db()
-            db.table("posts").update(
-                {"status": "failed", "metadata": {"last_error": str(exc)[:500]}}
-            ).eq("id", post_id).execute()
+            db = await get_db()
+            await (
+                db.table("posts")
+                .update({"status": "failed", "metadata": {"last_error": str(exc)[:500]}})
+                .eq("id", post_id)
+                .execute()
+            )
             sender_obj = _get_sender(channel)
             await sender_obj.send_text(
                 channel_user_id,
@@ -391,37 +457,46 @@ async def _publish_now_async(
     from app.db.models import UserRow
     from app.zernio.client import ZernioClient, ZernioError
 
-    db = get_db()
+    db = await get_db()
     sender = _get_sender(channel)
 
     try:
-        user_row = db.table("users").select("*").eq("id", user_id).single().execute()
+        user_row = await db.table("users").select("*").eq("id", user_id).single().execute()
         user = UserRow(**user_row.data)
 
         api_key = decrypt(user.zernio_api_key_enc)
         client = ZernioClient(api_key=api_key)
 
         # Save post first
-        post_result = db.table("posts").insert(
-            {
-                "user_id": user_id,
-                "content": content,
-                "status": "approved",
-            }
-        ).execute()
-        if not post_result.data:
+        post_result = (
+            await db.table("posts")
+            .insert(
+                {
+                    "user_id": user_id,
+                    "content": content,
+                    "status": "approved",
+                }
+            )
+            .execute()
+        )
+        if not post_result or not post_result.data:
             raise RuntimeError("Failed to save post record before publishing")
         post_id = post_result.data[0]["id"]
 
         zernio_post = await client.publish_now(content=content, account_id=user.zernio_account_id)
 
-        db.table("posts").update(
-            {
-                "status": "published",
-                "zernio_post_id": zernio_post.id,
-                "published_at": datetime.now(timezone.utc).isoformat(),
-            }
-        ).eq("id", post_id).execute()
+        await (
+            db.table("posts")
+            .update(
+                {
+                    "status": "published",
+                    "zernio_post_id": zernio_post.id,
+                    "published_at": datetime.now(timezone.utc).isoformat(),
+                }
+            )
+            .eq("id", post_id)
+            .execute()
+        )
 
         await sender.send_text(
             channel_user_id,
@@ -444,13 +519,21 @@ def send_reminder_task(user_id: str, post_id: str, channel: str, channel_user_id
     run_async(_send_reminder_async(user_id, post_id, channel, channel_user_id))
 
 
-async def _send_reminder_async(user_id: str, post_id: str, channel: str, channel_user_id: str) -> None:
+async def _send_reminder_async(
+    user_id: str, post_id: str, channel: str, channel_user_id: str
+) -> None:
     from app.db.client import get_db
 
-    db = get_db()
+    db = await get_db()
     sender = _get_sender(channel)
 
-    post_row = db.table("posts").select("content, scheduled_for, status").eq("id", post_id).single().execute()
+    post_row = (
+        await db.table("posts")
+        .select("content, scheduled_for, status")
+        .eq("id", post_id)
+        .single()
+        .execute()
+    )
     post = post_row.data
 
     if post["status"] in ("cancelled", "published", "failed"):
@@ -471,11 +554,16 @@ async def _send_reminder_async(user_id: str, post_id: str, channel: str, channel
 @celery_app.task(queue="default", name="app.scheduler.tasks.watchdog_stale_jobs")
 def watchdog_stale_jobs() -> None:
     """Re-queue any schedule_jobs that are past their run_at but still pending."""
+    run_async(_watchdog_stale_jobs_async())
+
+
+async def _watchdog_stale_jobs_async() -> None:
     from app.db.client import get_db
-    db = get_db()
+
+    db = await get_db()
     now = datetime.now(timezone.utc)
 
-    stale = (
+    stale = await (
         db.table("schedule_jobs")
         .select("id, user_id, post_id, attempts")
         .eq("status", "pending")
@@ -485,14 +573,14 @@ def watchdog_stale_jobs() -> None:
 
     for job in stale.data:
         # Fetch channel info from users table so we can notify them
-        user_result = (
+        user_result = await (
             db.table("users")
             .select("channel, channel_user_id")
             .eq("id", job["user_id"])
             .maybe_single()
             .execute()
         )
-        if not user_result.data:
+        if not user_result or not user_result.data:
             logger.warning("watchdog.user_not_found", job_id=job["id"])
             continue
 
@@ -519,10 +607,15 @@ def watchdog_stale_jobs() -> None:
 @celery_app.task(queue="default", name="app.scheduler.tasks.cleanup_webhook_log")
 def cleanup_webhook_log() -> None:
     """Delete webhook_log rows older than 30 days to keep the table lean."""
+    run_async(_cleanup_webhook_log_async())
+
+
+async def _cleanup_webhook_log_async() -> None:
     from app.db.client import get_db
-    db = get_db()
+
+    db = await get_db()
     cutoff = (datetime.now(timezone.utc) - timedelta(days=30)).isoformat()
-    db.table("webhook_log").delete().lt("processed_at", cutoff).execute()
+    await db.table("webhook_log").delete().lt("processed_at", cutoff).execute()
     logger.info("cleanup.webhook_log.done", cutoff=cutoff)
 
 
@@ -541,22 +634,24 @@ def process_auto_schedules() -> None:
 
 async def _process_auto_schedules_async() -> None:
     from datetime import datetime, timedelta, timezone
+
     import pytz
+
     from app.db.client import get_db
 
-    db = get_db()
+    db = await get_db()
     now = datetime.now(timezone.utc)
     lookahead = now + timedelta(hours=25)
 
     # Find all users with auto-schedule enabled
-    result = (
+    result = await (
         db.table("user_schedules")
         .select("user_id, days_of_week, time_of_day, timezone, auto_generate")
         .eq("enabled", True)
         .execute()
     )
 
-    for sched in result.data:
+    for sched in result.data if result and result.data else []:
         try:
             await _check_user_auto_schedule(db, sched, now, lookahead)
         except Exception as exc:
@@ -575,6 +670,7 @@ async def _check_user_auto_schedule(
 ) -> None:
     """Check one user's auto-schedule and queue a post if a slot is coming up."""
     from datetime import datetime, timedelta, timezone
+
     import pytz
 
     user_id = sched["user_id"]
@@ -609,7 +705,7 @@ async def _check_user_auto_schedule(
         # Check if a post is already scheduled for this slot (±1 hour window)
         window_start = (slot_utc - timedelta(hours=1)).isoformat()
         window_end = (slot_utc + timedelta(hours=1)).isoformat()
-        existing = (
+        existing = await (
             db.table("posts")
             .select("id")
             .eq("user_id", user_id)
@@ -639,8 +735,14 @@ async def _send_auto_schedule_nudge(
     """Send a nudge to a user reminding them to write a post for an upcoming slot."""
     from datetime import datetime
 
-    user_result = db.table("users").select("channel, channel_user_id, is_active").eq("id", user_id).maybe_single().execute()
-    if not user_result.data or not user_result.data.get("is_active"):
+    user_result = (
+        await db.table("users")
+        .select("channel, channel_user_id, is_active")
+        .eq("id", user_id)
+        .maybe_single()
+        .execute()
+    )
+    if not user_result or not user_result.data or not user_result.data.get("is_active"):
         return
 
     channel = user_result.data["channel"]
@@ -672,6 +774,7 @@ def update_style_memory_task(user_id: str, content: str) -> None:
 async def _update_style_memory_async(user_id: str, content: str) -> None:
     try:
         from app.content.style_memory import update_style_from_post
+
         await update_style_from_post(user_id, content)
     except Exception as exc:
         logger.warning("tasks.style_memory.failed", user_id=user_id, error=str(exc))
@@ -683,8 +786,10 @@ async def _update_style_memory_async(user_id: str, content: str) -> None:
 def _get_sender(channel: str):
     if channel == "telegram":
         from app.channels.telegram import TelegramSender
+
         return TelegramSender()
     elif channel == "whatsapp":
         from app.channels.whatsapp import WhatsAppSender
+
         return WhatsAppSender()
     raise ValueError(f"Unknown channel: {channel}")

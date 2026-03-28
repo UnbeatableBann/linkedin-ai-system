@@ -314,7 +314,8 @@ def _handle_response(resp: httpx.Response) -> dict[str, Any]:
             detail = resp.json().get("message", resp.text)
         except Exception:
             detail = resp.text
-        raise ZernioError(f"Zernio error: {detail}", status_code=resp.status_code)
+        clean_detail = _sanitize_error_detail(detail)
+        raise ZernioError(f"Zernio error: {clean_detail}", status_code=resp.status_code)
 
     try:
         return resp.json()
@@ -335,3 +336,18 @@ def make_zernio_client(user: "UserRow") -> ZernioClient:
 
     api_key = decrypt(user.zernio_api_key_enc)
     return ZernioClient(api_key=api_key)
+
+
+def _sanitize_error_detail(detail: Any) -> str:
+    """Normalize API error text for safe user-facing messages."""
+    text = str(detail or "Request rejected by Zernio.")
+
+    lower = text.lower()
+    if "<!doctype html" in lower or "<html" in lower:
+        return "Unexpected response from Zernio. Please try again in a moment."
+
+    text = " ".join(text.split())
+    if len(text) > 220:
+        text = text[:220].rstrip() + "..."
+
+    return text

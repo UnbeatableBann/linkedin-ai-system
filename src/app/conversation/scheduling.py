@@ -196,8 +196,8 @@ async def _confirm_and_enqueue(
         return
 
     # Save post to DB
-    db = get_db()
-    post_result = (
+    db = await get_db()
+    post_result = await (
         db.table("posts")
         .insert(
             {
@@ -217,7 +217,7 @@ async def _confirm_and_enqueue(
         )
         .execute()
     )
-    if not post_result.data:
+    if not post_result or not post_result.data:
         await sender.send_text(
             msg.channel_user_id,
             "Failed to save your post. Please try again or /cancel to start fresh.",
@@ -286,8 +286,8 @@ async def _check_conflict(user_id: str, proposed_dt: datetime) -> bool:
     settings = get_settings()
     window = timedelta(minutes=settings.conflict_window_minutes)
 
-    db = get_db()
-    result = (
+    db = await get_db()
+    result = await (
         db.table("posts")
         .select("id")
         .eq("user_id", user_id)
@@ -296,13 +296,13 @@ async def _check_conflict(user_id: str, proposed_dt: datetime) -> bool:
         .lte("scheduled_for", (proposed_dt + window).isoformat())
         .execute()
     )
-    return len(result.data) > 0
+    return len(result.data) > 0 if result and result.data else False
 
 
 async def _handle_list(sender: object, channel_user_id: str, user_id: str) -> None:
     """Show the user's upcoming scheduled posts."""
-    db = get_db()
-    result = (
+    db = await get_db()
+    result = await (
         db.table("posts")
         .select("id, content, status, scheduled_for")
         .eq("user_id", user_id)
@@ -312,7 +312,7 @@ async def _handle_list(sender: object, channel_user_id: str, user_id: str) -> No
         .execute()
     )
 
-    if not result.data:
+    if not result or not result.data:
         await sender.send_text(channel_user_id, "No upcoming scheduled posts. Send me a topic to write one!")
         return
 
@@ -327,8 +327,8 @@ async def _handle_list(sender: object, channel_user_id: str, user_id: str) -> No
 
 async def _handle_toggle_auto(sender: object, channel_user_id: str, user_id: str) -> None:
     """Toggle Mon/Fri auto-scheduling on or off."""
-    db = get_db()
-    result = (
+    db = await get_db()
+    result = await (
         db.table("user_schedules")
         .select("enabled")
         .eq("user_id", user_id)
@@ -336,10 +336,10 @@ async def _handle_toggle_auto(sender: object, channel_user_id: str, user_id: str
         .execute()
     )
 
-    current = result.data["enabled"] if result.data else False
+    current = result.data["enabled"] if result and result.data else False
     new_state = not current
 
-    db.table("user_schedules").upsert(
+    await db.table("user_schedules").upsert(
         {"user_id": user_id, "enabled": new_state},
         on_conflict="user_id",
     ).execute()
@@ -360,8 +360,8 @@ async def _handle_cancel_post(
     post_id_prefix: str,
 ) -> None:
     """Cancel a scheduled post by ID (or ID prefix)."""
-    db = get_db()
-    result = (
+    db = await get_db()
+    result = await (
         db.table("posts")
         .select("id, status, zernio_post_id, content")
         .eq("user_id", user_id)
@@ -370,7 +370,7 @@ async def _handle_cancel_post(
         .execute()
     )
 
-    if not result.data:
+    if not result or not result.data:
         await sender.send_text(channel_user_id, f"No post found with ID starting with `{post_id_prefix}`.")
         return
 
@@ -390,7 +390,7 @@ async def _handle_cancel_post(
     # Cancel in Zernio if it has a Zernio ID
     if post.get("zernio_post_id"):
         try:
-            user_result = db.table("users").select("zernio_api_key_enc").eq("id", user_id).single().execute()
+            user_result = await db.table("users").select("zernio_api_key_enc").eq("id", user_id).single().execute()
             from app.core.encryption import decrypt
             from app.zernio.client import ZernioClient
             api_key = decrypt(user_result.data["zernio_api_key_enc"])
@@ -400,8 +400,8 @@ async def _handle_cancel_post(
             logger.warning("scheduling.zernio_cancel_failed", error=str(exc))
 
     # Mark as cancelled in our DB
-    db.table("posts").update({"status": "cancelled"}).eq("id", post["id"]).execute()
-    db.table("schedule_jobs").update({"status": "cancelled"}).eq("post_id", post["id"]).execute()
+    await db.table("posts").update({"status": "cancelled"}).eq("id", post["id"]).execute()
+    await db.table("schedule_jobs").update({"status": "cancelled"}).eq("post_id", post["id"]).execute()
 
     await sender.send_text(
         channel_user_id,

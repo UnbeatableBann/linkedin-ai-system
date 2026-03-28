@@ -38,9 +38,9 @@ class ConfigurationError(AppError):
     def user_message(self) -> str:
         messages = {
             "zernio_key": "Your Zernio API key is not set up. Run /start to connect.",
-            "llm_key":    "Your AI provider is not configured. Run /settings to set it up.",
-            "linkedin":   "Your LinkedIn account is not connected. Run /reconnect.",
-            "timezone":   "Your timezone is not set. Use /timezone Asia/Kolkata to set it.",
+            "llm_key": "Your AI provider is not configured. Run /settings to set it up.",
+            "linkedin": "Your LinkedIn account is not connected. Run /reconnect.",
+            "timezone": "Your timezone is not set. Use /timezone Asia/Kolkata to set it.",
         }
         return messages.get(self.missing, f"Setup incomplete: {self.missing}. Run /start.")
 
@@ -78,3 +78,7 @@ def format_error_for_user(exc: Exception) -> str:
         "Something unexpected happened. Your draft is safe.\n\n"
         "Send a message to continue, or /cancel to start fresh."
     )
+
+
+# TODO:
+# 1. You’re leaking raw messages from LLM/Zernio

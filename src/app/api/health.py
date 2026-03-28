@@ -28,8 +28,8 @@ async def health_check() -> dict:
     # ── Supabase ─────────────────────────────────────────────────────────────
     try:
         from app.db.client import get_db
-        db = get_db()
-        db.table("users").select("id").limit(1).execute()
+        db = await get_db()
+        await db.table("users").select("id").limit(1).execute()
         checks["supabase"] = "ok"
     except Exception as exc:
         logger.error("health.supabase_failed", error=str(exc))

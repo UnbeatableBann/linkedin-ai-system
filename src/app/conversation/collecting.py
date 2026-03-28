@@ -15,24 +15,44 @@ Intent detection:
   - User says "just write it" → GENERATING with what we have
 """
 
-from uuid import UUID
+import re
 
 from app.channels.base import NormalisedMessage
 from app.core.logging import get_logger
 from app.db.models import UserRow
 from app.session.fsm import Event, transition
-from app.session.models import SessionState
 from app.session.store import Session
 
 logger = get_logger(__name__)
 
 # If the user sends text longer than this, assume it's a full draft
 FULL_DRAFT_THRESHOLD = 150
+COMMON_SHORT_TOPICS = {
+    "ai",
+    "ml",
+    "llm",
+    "ux",
+    "ui",
+    "qa",
+    "hr",
+    "seo",
+    "api",
+    "saas",
+    "b2b",
+    "b2c",
+}
 
 # Phrases that mean "skip questions and just generate"
 SKIP_PHRASES = {
-    "just write it", "go ahead", "write it", "just do it",
-    "don't ask", "skip", "generate", "write now", "just write",
+    "just write it",
+    "go ahead",
+    "write it",
+    "just do it",
+    "don't ask",
+    "skip",
+    "generate",
+    "write now",
+    "just write",
 }
 
 
@@ -59,7 +79,17 @@ async def handle_idle(
         await _enqueue_generation(session, user, msg.channel_user_id, sender)
         return
 
-    # Normal idea/topic → start collecting
+    if not _looks_like_meaningful_topic(text):
+        await sender.send_text(
+            msg.channel_user_id,
+            "I need a clearer topic or idea before I write the post.\n\n"
+            "Try something like:\n"
+            "- `how AI is saving me time at work`\n"
+            "- `lessons from building my first product`\n"
+            "- `why engineers should write on LinkedIn`",
+        )
+        return
+
     session.context.clear_draft()
     session.context.topic = text
     session.context.clarification_round = 0
@@ -115,6 +145,14 @@ async def handle_collecting(
     # Round 0: collecting tone
     if round_num == 0:
         tone = _parse_tone(msg.text)
+        if tone is None:
+            await sender.send_text(
+                msg.channel_user_id,
+                "I didn't quite catch the tone.\n\n"
+                "Pick *1-4* or describe it in a few words like `bold and opinionated` or `friendly and simple`.",
+            )
+            await _ask_tone(sender, msg.channel_user_id)
+            return
         session.context.tone = tone
         session.context.clarification_round = 1
         await _ask_audience(sender, msg.channel_user_id)
@@ -122,14 +160,32 @@ async def handle_collecting(
 
     # Round 1: collecting audience
     if round_num == 1:
-        session.context.audience = msg.text.strip() or "professionals"
+        audience = _parse_audience(msg.text)
+        if audience is None:
+            await sender.send_text(
+                msg.channel_user_id,
+                "I didn't quite catch the audience.\n\n"
+                "Pick *1-4* or describe the audience like `backend engineers`, `job seekers`, or `early-stage founders`.",
+            )
+            await _ask_audience(sender, msg.channel_user_id)
+            return
+        session.context.audience = audience
         session.context.clarification_round = 2
         await _ask_length(sender, msg.channel_user_id)
         return
 
     # Round 2: collecting length preference
     if round_num == 2:
-        session.context.length_pref = _parse_length(msg.text)
+        length_pref = _parse_length(msg.text)
+        if length_pref is None:
+            await sender.send_text(
+                msg.channel_user_id,
+                "I didn't catch the length.\n\n"
+                "Reply with *1*, *2*, *3*, or say *go* to use medium.",
+            )
+            await _ask_length(sender, msg.channel_user_id)
+            return
+        session.context.length_pref = length_pref
         session.context.clarification_round = 3
 
         # Enough info — generate
@@ -188,7 +244,7 @@ async def _ask_length(sender: object, channel_user_id: str) -> None:
     )
 
 
-def _parse_tone(text: str) -> str:
+def _parse_tone(text: str) -> str | None:
     t = text.strip().lower()
     if t in ("1", "thought leadership", "thought", "leadership"):
         return "thought leadership"
@@ -198,17 +254,41 @@ def _parse_tone(text: str) -> str:
         return "tactical tips"
     if t in ("4", "conversational", "casual", "relatable"):
         return "conversational"
-    # User described their own tone
+    if _looks_unclear_freeform_reply(text):
+        return None
     return text.strip()
 
 
-def _parse_length(text: str) -> str:
+def _parse_audience(text: str) -> str | None:
     t = text.strip().lower()
-    if t in ("1", "short"):
+    if t in ("1", "founders", "founder", "startup", "startup people"):
+        return "founders / startup people"
+    if t in ("2", "product managers", "product manager", "pm", "pms"):
+        return "product managers"
+    if t in ("3", "engineers", "engineer", "tech", "tech people", "developers", "developer"):
+        return "engineers / tech people"
+    if t in ("4", "general professionals", "professionals", "professional", "general"):
+        return "general professionals"
+    if _looks_unclear_freeform_reply(text):
+        return None
+    return text.strip()
+
+
+def _parse_length(text: str) -> str | None:
+    t = text.strip().lower()
+    if t in ("1", "short", "brief"):
         return "short (around 150 words)"
+    if t in ("2", "medium", "go", "default"):
+        return "medium (around 300 words)"
     if t in ("3", "long"):
         return "long (around 500 words)"
-    return "medium (around 300 words)"  # Default for "2", "go", "medium", anything else
+    if "150" in t:
+        return "short (around 150 words)"
+    if "300" in t:
+        return "medium (around 300 words)"
+    if "500" in t:
+        return "long (around 500 words)"
+    return None
 
 
 def _apply_defaults(session: Session, user: UserRow) -> None:
@@ -219,6 +299,50 @@ def _apply_defaults(session: Session, user: UserRow) -> None:
         session.context.audience = user.style_prefs.get("audience", "professionals")
     if not session.context.length_pref:
         session.context.length_pref = "medium (around 300 words)"
+
+
+def _looks_like_meaningful_topic(text: str) -> bool:
+    cleaned = _normalise_freeform_text(text)
+    if not cleaned:
+        return False
+
+    tokens = cleaned.split()
+    if len(tokens) == 1:
+        token = tokens[0]
+        if token in COMMON_SHORT_TOPICS:
+            return True
+        if len(token) <= 3:
+            return False
+        if len(token) <= 5 and not _has_vowel(token):
+            return False
+        return True
+
+    return len([token for token in tokens if len(token) >= 2]) >= 2
+
+
+def _looks_unclear_freeform_reply(text: str) -> bool:
+    cleaned = _normalise_freeform_text(text)
+    if not cleaned:
+        return True
+
+    tokens = cleaned.split()
+    if len(tokens) == 1:
+        token = tokens[0]
+        if token in COMMON_SHORT_TOPICS:
+            return False
+        if len(token) <= 3:
+            return True
+        if len(token) <= 5 and not _has_vowel(token):
+            return True
+    return False
+
+
+def _normalise_freeform_text(text: str) -> str:
+    return " ".join(re.sub(r"[^a-z0-9\s]", " ", text.lower()).split())
+
+
+def _has_vowel(text: str) -> bool:
+    return any(ch in "aeiou" for ch in text.lower())
 
 
 async def _enqueue_generation(

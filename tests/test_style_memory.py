@@ -5,7 +5,6 @@ Tests for style signal extraction and preference merging.
 Pure unit tests — no DB, no network.
 """
 
-import pytest
 from app.content.style_memory import (
     extract_style_signals,
     merge_style_prefs,

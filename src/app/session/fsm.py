@@ -32,28 +32,29 @@ class InvalidTransitionError(Exception):
 # These are string constants used as event identifiers throughout the app.
 # Keeping them here avoids magic strings scattered across handlers.
 
+
 class Event:
     # Lifecycle
-    CANCEL          = "cancel"           # Universal: any → IDLE
+    CANCEL = "cancel"  # Universal: any → IDLE
     SESSION_EXPIRED = "session_expired"  # Any → IDLE (with notification)
 
     # Onboarding
-    START_ONBOARDING   = "start_onboarding"    # IDLE → ONBOARDING (new user)
-    ONBOARDING_DONE    = "onboarding_done"     # ONBOARDING → IDLE
+    START_ONBOARDING = "start_onboarding"  # IDLE → ONBOARDING (new user)
+    ONBOARDING_DONE = "onboarding_done"  # ONBOARDING → IDLE
 
     # Content creation
-    START_POST         = "start_post"          # IDLE → COLLECTING
-    START_POST_DIRECT  = "start_post_direct"   # IDLE → GENERATING (user sent full draft)
-    ENOUGH_INFO        = "enough_info"          # COLLECTING → GENERATING
-    DRAFT_READY        = "draft_ready"          # GENERATING → REVIEWING
-    GENERATION_FAILED  = "generation_failed"   # GENERATING → COLLECTING
+    START_POST = "start_post"  # IDLE → COLLECTING
+    START_POST_DIRECT = "start_post_direct"  # IDLE → GENERATING (user sent full draft)
+    ENOUGH_INFO = "enough_info"  # COLLECTING → GENERATING
+    DRAFT_READY = "draft_ready"  # GENERATING → REVIEWING
+    GENERATION_FAILED = "generation_failed"  # GENERATING → COLLECTING
 
     # Reviewing
-    REQUEST_EDIT       = "request_edit"        # REVIEWING → REFINING
-    APPROVE_DRAFT      = "approve_draft"       # REVIEWING → SCHEDULING
-    DISCARD_DRAFT      = "discard_draft"       # REVIEWING → IDLE
-    REFINEMENT_READY   = "refinement_ready"    # REFINING → REVIEWING
-    REFINEMENT_FAILED  = "refinement_failed"   # REFINING → REVIEWING (show error)
+    REQUEST_EDIT = "request_edit"  # REVIEWING → REFINING
+    APPROVE_DRAFT = "approve_draft"  # REVIEWING → SCHEDULING
+    DISCARD_DRAFT = "discard_draft"  # REVIEWING → IDLE
+    REFINEMENT_READY = "refinement_ready"  # REFINING → REVIEWING
+    REFINEMENT_FAILED = "refinement_failed"  # REFINING → REVIEWING (show error)
 
     # Scheduling
     SCHEDULE_CONFIRMED = "schedule_confirmed"  # SCHEDULING → SCHEDULED
@@ -66,34 +67,27 @@ class Event:
 
 _TRANSITIONS: dict[tuple[SessionState, str], SessionState] = {
     # From IDLE
-    (SessionState.IDLE, Event.START_ONBOARDING):  SessionState.ONBOARDING,
-    (SessionState.IDLE, Event.START_POST):         SessionState.COLLECTING,
-    (SessionState.IDLE, Event.START_POST_DIRECT):  SessionState.GENERATING,
-
+    (SessionState.IDLE, Event.START_ONBOARDING): SessionState.ONBOARDING,
+    (SessionState.IDLE, Event.START_POST): SessionState.COLLECTING,
+    (SessionState.IDLE, Event.START_POST_DIRECT): SessionState.GENERATING,
     # From ONBOARDING
     (SessionState.ONBOARDING, Event.ONBOARDING_DONE): SessionState.IDLE,
-
     # From COLLECTING
-    (SessionState.COLLECTING, Event.ENOUGH_INFO):      SessionState.GENERATING,
+    (SessionState.COLLECTING, Event.ENOUGH_INFO): SessionState.GENERATING,
     (SessionState.COLLECTING, Event.START_POST_DIRECT): SessionState.GENERATING,
-
     # From GENERATING
-    (SessionState.GENERATING, Event.DRAFT_READY):       SessionState.REVIEWING,
+    (SessionState.GENERATING, Event.DRAFT_READY): SessionState.REVIEWING,
     (SessionState.GENERATING, Event.GENERATION_FAILED): SessionState.COLLECTING,
-
     # From REVIEWING
-    (SessionState.REVIEWING, Event.REQUEST_EDIT):    SessionState.REFINING,
-    (SessionState.REVIEWING, Event.APPROVE_DRAFT):   SessionState.SCHEDULING,
-    (SessionState.REVIEWING, Event.DISCARD_DRAFT):   SessionState.IDLE,
-
+    (SessionState.REVIEWING, Event.REQUEST_EDIT): SessionState.REFINING,
+    (SessionState.REVIEWING, Event.APPROVE_DRAFT): SessionState.SCHEDULING,
+    (SessionState.REVIEWING, Event.DISCARD_DRAFT): SessionState.IDLE,
     # From REFINING
-    (SessionState.REFINING, Event.REFINEMENT_READY):  SessionState.REVIEWING,
+    (SessionState.REFINING, Event.REFINEMENT_READY): SessionState.REVIEWING,
     (SessionState.REFINING, Event.REFINEMENT_FAILED): SessionState.REVIEWING,
-
     # From SCHEDULING
     (SessionState.SCHEDULING, Event.SCHEDULE_CONFIRMED): SessionState.SCHEDULED,
     (SessionState.SCHEDULING, Event.SCHEDULE_CANCELLED): SessionState.IDLE,
-
     # From SCHEDULED — user cancelled a queued post
     (SessionState.SCHEDULED, Event.CANCEL): SessionState.IDLE,
 }
@@ -115,7 +109,12 @@ def transition(current_state: SessionState, event: str) -> SessionState:
     """
     # Universal escapes
     if event in (Event.CANCEL, Event.SESSION_EXPIRED):
-        logger.info("fsm.transition", from_state=current_state, event=event, to_state=SessionState.IDLE)
+        logger.info(
+            "fsm.transition",
+            from_state=current_state,
+            input_event=event,
+            to_state=SessionState.IDLE,
+        )
         return SessionState.IDLE
 
     # Loopback: some states stay in the same state while gathering info
@@ -128,7 +127,7 @@ def transition(current_state: SessionState, event: str) -> SessionState:
         raise InvalidTransitionError(current_state, event)
 
     next_state = _TRANSITIONS[key]
-    logger.info("fsm.transition", from_state=current_state, event=event, to_state=next_state)
+    logger.info("fsm.transition", from_state=current_state, input_event=event, to_state=next_state)
     return next_state
 
 

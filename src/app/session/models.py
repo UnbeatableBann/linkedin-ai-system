@@ -48,6 +48,8 @@ class SessionContext(BaseModel):
 
     # ── Onboarding sub-state ────────────────────────────────────────────────
     onboarding_step: OnboardingStep | None = None
+    onboarding_llm_provider: str | None = None
+    onboarding_llm_model: str | None = None
     connect_token: str | None = None
     connect_token_issued_at: str | None = None  # ISO datetime string
     pending_orgs: list[dict[str, Any]] = Field(default_factory=list)
@@ -90,6 +92,15 @@ class SessionContext(BaseModel):
         self.edit_history = []
         self.proposed_schedule_time = None
         self.pending_message = None
+
+    def clear_onboarding(self) -> None:
+        """Reset onboarding-only transient state."""
+        self.onboarding_step = None
+        self.onboarding_llm_provider = None
+        self.onboarding_llm_model = None
+        self.connect_token = None
+        self.connect_token_issued_at = None
+        self.pending_orgs = []
 
     def push_edit_history(self, content: str) -> None:
         """Save current draft to history before overwriting with refinement."""

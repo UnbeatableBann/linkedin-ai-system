@@ -129,24 +129,24 @@ async def update_style_from_post(user_id: str, content: str) -> None:
     """
     from app.db.client import get_db
 
-    db = get_db()
+    db = await get_db()
 
     # Load current prefs
-    result = (
+    result = await (
         db.table("users")
         .select("style_prefs")
         .eq("id", user_id)
         .single()
         .execute()
     )
-    current_prefs = result.data.get("style_prefs", {}) if result.data else {}
+    current_prefs = result.data.get("style_prefs", {}) if result and result.data else {}
 
     # Extract and merge
     signals = extract_style_signals(content)
     updated_prefs = merge_style_prefs(current_prefs, signals, example_post=content)
 
     # Save back
-    db.table("users").update({"style_prefs": updated_prefs}).eq("id", user_id).execute()
+    await db.table("users").update({"style_prefs": updated_prefs}).eq("id", user_id).execute()
 
     logger.info(
         "style_memory.updated",

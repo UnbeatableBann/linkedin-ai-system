@@ -29,12 +29,12 @@ Each user brings their own LLM API key (Anthropic, OpenAI, or Groq) and their ow
 
 ## Quick Start
 
-### 1. Clone and install script deps
+### 1. Clone and sync dependencies with uv
 
 ```bash
 git clone <repo>
 cd linkedin-ai-system
-pip install cryptography httpx python-dotenv
+uv sync --all-extras
 ```
 
 ### 2. Run setup wizard
@@ -48,7 +48,7 @@ This generates `.env` with all required credentials.
 ### 3. Run Supabase migrations
 
 1. Open [app.supabase.com](https://app.supabase.com) → your project → SQL Editor
-2. Copy the contents of `app/db/migrations/001_initial.sql`
+2. Copy the contents of `src/app/db/migrations/001_initial.sql`
 3. Paste and run
 
 ### 4. Start ngrok (for local Telegram/WhatsApp webhooks)
@@ -74,7 +74,7 @@ This starts:
 ### 6. Register Telegram webhook
 
 ```bash
-python scripts/register_telegram_webhook.py
+uv run python scripts/register_telegram_webhook.py
 ```
 
 ### 7. Register WhatsApp webhook
@@ -92,8 +92,8 @@ Open Telegram, message your bot with `/start`. You should get the onboarding flo
 
 ## Project Structure
 
-```
-app/
+```text
+src/app/
 ├── api/                    FastAPI routes (webhooks, oauth callback, health)
 ├── channels/               Telegram + WhatsApp adapters
 ├── content/                LLM generation, refinement, post rules
@@ -115,17 +115,17 @@ tests/                      pytest test suite
 ## Running Tests
 
 ```bash
-# Install dev deps
-pip install -e ".[dev]"
+# Sync all dependencies (including dev/docs extras)
+uv sync --all-extras
 
 # Run all tests
-pytest
+uv run pytest
 
 # Run with coverage
-pytest --cov=app --cov-report=term-missing
+uv run pytest --cov=app --cov-report=term-missing
 
 # Run a specific test file
-pytest tests/test_fsm.py -v
+uv run pytest tests/test_fsm.py -v
 ```
 
 ---
@@ -147,7 +147,7 @@ Key variables:
 
 ## Architecture
 
-```
+```text
 Telegram / WhatsApp
       ↓
 Channel Gateway (HMAC verify → dedup → user resolve)
@@ -186,8 +186,42 @@ Supabase (all state persisted — survives restarts)
 3. Add Redis service in Railway
 4. Set all environment variables from `.env` in Railway dashboard
 5. Add a second service for Celery worker:
-   - Start command: `celery -A app.scheduler.celery_app worker --loglevel=info -Q generation,publishing,default`
+      - Start command: `uv run celery -A app.scheduler.celery_app worker --loglevel=info -Q generation,publishing,default`
 6. Add a third service for Celery Beat:
-   - Start command: `celery -A app.scheduler.celery_app beat --loglevel=info`
+      - Start command: `uv run celery -A app.scheduler.celery_app beat --loglevel=info`
 7. Update `OAUTH_CALLBACK_BASE_URL` to your Railway URL
-8. Run `python scripts/register_telegram_webhook.py --url https://your-app.railway.app`
+8. Run `uv run python scripts/register_telegram_webhook.py --url https://your-app.railway.app`
+
+---
+
+## Package and Tooling Workflow (uv)
+
+- Add runtime dependencies:
+
+```bash
+uv add <package>
+```
+
+- Add dev-only dependencies:
+
+```bash
+uv add --dev <package>
+```
+
+- Update lockfile after dependency changes:
+
+```bash
+uv lock
+```
+
+- Re-sync virtualenv exactly from lockfile:
+
+```bash
+uv sync --frozen --all-extras
+```
+
+- Run commands inside project environment:
+
+```bash
+uv run <command>
+```
