@@ -17,15 +17,15 @@ These tests verify that:
   4. Session is persisted after every message
 """
 
-import pytest
-from datetime import datetime, timedelta, timezone
-from unittest.mock import AsyncMock, MagicMock, patch, call
+from datetime import UTC, datetime
+from unittest.mock import AsyncMock, MagicMock, patch
 from uuid import uuid4
 
-from app.channels.base import MessageType, NormalisedMessage
-from app.session.models import SessionState, SessionContext, OnboardingStep
-from app.db.models import UserRow, Channel, LLMProvider
+import pytest
 
+from app.channels.base import MessageType, NormalisedMessage
+from app.db.models import Channel, LLMProvider, UserRow
+from app.session.models import SessionContext, SessionState
 
 # ── Helpers ────────────────────────────────────────────────────────────────
 
@@ -89,8 +89,9 @@ def make_user(
     onboarded: bool = True,
 ) -> UserRow:
     """Build a UserRow for testing."""
-    from cryptography.fernet import Fernet
     import os
+
+    from cryptography.fernet import Fernet
 
     key = os.environ.get("FERNET_SECRET_KEY")
     if not key:
@@ -114,7 +115,7 @@ def make_user(
         timezone="Asia/Kolkata",
         style_prefs={},
         is_active=True,
-        created_at=datetime.now(timezone.utc),
+        created_at=datetime.now(UTC),
     )
 
 
@@ -125,6 +126,7 @@ def make_user(
 def env_setup(monkeypatch):
     """Set env vars for all tests in this module."""
     from cryptography.fernet import Fernet
+
     key = Fernet.generate_key().decode()
     monkeypatch.setenv("FERNET_SECRET_KEY", key)
     monkeypatch.setenv("TELEGRAM_BOT_TOKEN", "123:test")
@@ -137,6 +139,7 @@ def env_setup(monkeypatch):
     monkeypatch.setenv("WHATSAPP_VERIFY_TOKEN", "verify")
     monkeypatch.setenv("OAUTH_CALLBACK_BASE_URL", "https://test.example.com")
     from app.config import get_settings
+
     get_settings.cache_clear()
     yield
     get_settings.cache_clear()
@@ -169,6 +172,7 @@ class TestCancelCommand:
             patch("app.conversation.dispatcher._get_sender", return_value=sender),
         ):
             from app.conversation.dispatcher import dispatch
+
             await dispatch(user_id=user.id, msg=msg)
 
         assert session.state == SessionState.IDLE
@@ -196,6 +200,7 @@ class TestCancelCommand:
             patch("app.conversation.dispatcher._get_sender", return_value=sender),
         ):
             from app.conversation.dispatcher import dispatch
+
             await dispatch(user_id=user.id, msg=msg)
 
         # State should still be IDLE, message should explain nothing to cancel
@@ -222,6 +227,7 @@ class TestCancelCommand:
             patch("app.conversation.dispatcher._get_sender", return_value=sender),
         ):
             from app.conversation.dispatcher import dispatch
+
             await dispatch(user_id=user.id, msg=msg)
 
         assert session.state == SessionState.IDLE
@@ -250,6 +256,7 @@ class TestHelpCommand:
             patch("app.conversation.dispatcher._get_sender", return_value=sender),
         ):
             from app.conversation.dispatcher import dispatch
+
             await dispatch(user_id=user.id, msg=msg)
 
         reply = sender.send_text.call_args[0][1]
@@ -282,6 +289,7 @@ class TestStartCommand:
             patch("app.conversation.dispatcher._get_sender", return_value=sender),
         ):
             from app.conversation.dispatcher import dispatch
+
             await dispatch(user_id=user.id, msg=msg)
 
         reply = sender.send_text.call_args[0][1]
@@ -304,6 +312,7 @@ class TestStartCommand:
             patch("app.conversation.dispatcher._get_sender", return_value=sender),
         ):
             from app.conversation.dispatcher import dispatch
+
             await dispatch(user_id=user.id, msg=msg)
 
         # Should send an onboarding message
@@ -336,6 +345,7 @@ class TestIdleStateNewPost:
             patch("app.conversation.dispatcher._get_sender", return_value=sender),
         ):
             from app.conversation.dispatcher import dispatch
+
             await dispatch(user_id=user.id, msg=msg)
 
         assert session.state == SessionState.COLLECTING
@@ -370,6 +380,7 @@ class TestIdleStateNewPost:
         ):
             mock_task.delay = MagicMock()
             from app.conversation.dispatcher import dispatch
+
             await dispatch(user_id=user.id, msg=msg)
 
         assert session.state == SessionState.GENERATING
@@ -402,6 +413,7 @@ class TestReviewingState:
             patch("app.conversation.dispatcher._get_sender", return_value=sender),
         ):
             from app.conversation.dispatcher import dispatch
+
             await dispatch(user_id=user.id, msg=msg)
 
         assert session.state == SessionState.SCHEDULING
@@ -429,6 +441,7 @@ class TestReviewingState:
         ):
             mock_task.delay = MagicMock()
             from app.conversation.dispatcher import dispatch
+
             await dispatch(user_id=user.id, msg=msg)
 
         assert session.state == SessionState.REFINING
@@ -457,6 +470,7 @@ class TestReviewingState:
             patch("app.conversation.dispatcher._get_sender", return_value=sender),
         ):
             from app.conversation.dispatcher import dispatch
+
             await dispatch(user_id=user.id, msg=msg)
 
         assert session.state == SessionState.IDLE
@@ -480,6 +494,7 @@ class TestReviewingState:
             patch("app.conversation.dispatcher._get_sender", return_value=sender),
         ):
             from app.conversation.dispatcher import dispatch
+
             await dispatch(user_id=user.id, msg=msg)
 
         # Message should be queued
@@ -513,6 +528,7 @@ class TestDeleteCommand:
             patch("app.conversation.dispatcher._get_sender", return_value=sender),
         ):
             from app.conversation.dispatcher import dispatch
+
             await dispatch(user_id=user.id, msg=msg)
 
         reply = sender.send_text.call_args[0][1]
@@ -530,9 +546,13 @@ class TestDeleteCommand:
 
         mock_db = MagicMock()
         # Scheduled posts query
-        mock_db.table.return_value.select.return_value.eq.return_value.eq.return_value.execute.return_value = MagicMock(data=[])
+        mock_db.table.return_value.select.return_value.eq.return_value.eq.return_value.execute.return_value = MagicMock(
+            data=[]
+        )
         # All other queries
-        mock_db.table.return_value.update.return_value.eq.return_value.eq.return_value.execute.return_value = MagicMock()
+        mock_db.table.return_value.update.return_value.eq.return_value.eq.return_value.execute.return_value = (
+            MagicMock()
+        )
         mock_db.table.return_value.update.return_value.eq.return_value.execute.return_value = MagicMock()
 
         with (
@@ -544,6 +564,7 @@ class TestDeleteCommand:
             patch("app.conversation.dispatcher.get_db", return_value=mock_db),
         ):
             from app.conversation.dispatcher import dispatch
+
             await dispatch(user_id=user.id, msg=msg)
 
         reply = sender.send_text.call_args[0][1]
@@ -559,7 +580,7 @@ class TestRateLimiting:
     @pytest.mark.asyncio
     async def test_rate_limited_message_blocked(self):
         """When rate limit is exceeded, message is rejected with user-friendly reply."""
-        from app.core.rate_limiter import RateLimitExceeded, LimitType
+        from app.core.rate_limiter import LimitType, RateLimitExceededError
 
         user = make_user()
         session = make_session()
@@ -568,7 +589,7 @@ class TestRateLimiting:
         sender = MagicMock()
         sender.send_text = AsyncMock()
 
-        exc = RateLimitExceeded(LimitType.MESSAGE, retry_after_seconds=30)
+        exc = RateLimitExceededError(LimitType.MESSAGE, retry_after_seconds=30)
 
         with (
             patch("app.conversation.dispatcher._load_user", return_value=user),
@@ -578,6 +599,7 @@ class TestRateLimiting:
             patch("app.conversation.dispatcher._get_sender", return_value=sender),
         ):
             from app.conversation.dispatcher import dispatch
+
             await dispatch(user_id=user.id, msg=msg)
 
         # User should get a rate limit message
@@ -600,11 +622,14 @@ class TestRateLimiting:
             patch("app.conversation.dispatcher.get_or_create_session", return_value=session),
             patch("app.conversation.dispatcher.save_session", new_callable=AsyncMock),
             # Simulate Redis being down — check_rate_limit raises generic error
-            patch("app.conversation.dispatcher.check_rate_limit",
-                  side_effect=ConnectionError("Redis unavailable")),
+            patch(
+                "app.conversation.dispatcher.check_rate_limit",
+                side_effect=ConnectionError("Redis unavailable"),
+            ),
             patch("app.conversation.dispatcher._get_sender", return_value=sender),
         ):
             from app.conversation.dispatcher import dispatch
+
             await dispatch(user_id=user.id, msg=msg)
 
         # Help message should still be sent (fail open)
@@ -641,6 +666,7 @@ class TestErrorRecovery:
             patch("app.conversation.collecting.handle_idle", side_effect=boom),
         ):
             from app.conversation.dispatcher import dispatch
+
             await dispatch(user_id=user.id, msg=msg)
 
         # User gets a friendly error (not a stack trace)
@@ -661,6 +687,7 @@ class TestErrorRecovery:
             patch("app.conversation.dispatcher._load_user", return_value=None),
         ):
             from app.conversation.dispatcher import dispatch
+
             # Should not raise
             await dispatch(user_id=uuid4(), msg=msg)
 
@@ -693,6 +720,7 @@ class TestWhatsAppChannel:
             patch("app.conversation.dispatcher._get_sender", return_value=sender),
         ):
             from app.conversation.dispatcher import dispatch
+
             await dispatch(user_id=user.id, msg=msg)
 
         assert session.state == SessionState.COLLECTING
@@ -702,7 +730,7 @@ class TestWhatsAppChannel:
         """WhatsApp messages use WhatsAppSender, not TelegramSender."""
         user = make_user(channel="whatsapp", channel_user_id="919876543210")
         session = make_session()
-        msg = make_msg("/help", channel="whatsapp", channel_user_id="919876543210")
+        msg = make_msg("/help", channel="whatsapp", channel_user_id="919876543210")  # noqa: F841
 
         sender = MagicMock()
         sender.send_text = AsyncMock()
@@ -715,8 +743,8 @@ class TestWhatsAppChannel:
             patch("app.channels.whatsapp.WhatsAppSender", return_value=sender),
         ):
             from app.conversation.dispatcher import _get_sender
-            result = _get_sender("whatsapp")
+
+            result = _get_sender("whatsapp")  # noqa: F841
 
         # Should be a WhatsAppSender instance
-        from app.channels.whatsapp import WhatsAppSender
         # (We can't assert the exact type since it's mocked, but the call chain is tested)

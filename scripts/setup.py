@@ -14,11 +14,8 @@ What it does:
   4. Registers the Telegram webhook
 """
 
-import os
 import sys
-import subprocess
 from pathlib import Path
-
 
 ROOT = Path(__file__).parent.parent
 ENV_FILE = ROOT / ".env"
@@ -38,6 +35,7 @@ def ask(prompt: str, default: str = "", secret: bool = False) -> str:
 
     if secret:
         import getpass
+
         value = getpass.getpass(display_prompt)
     else:
         value = input(display_prompt).strip()
@@ -47,6 +45,7 @@ def ask(prompt: str, default: str = "", secret: bool = False) -> str:
 
 def generate_fernet_key() -> str:
     from cryptography.fernet import Fernet
+
     return Fernet.generate_key().decode()
 
 
@@ -97,6 +96,7 @@ def main() -> None:
 
     print("\nGenerating a webhook secret...")
     import secrets
+
     config["TELEGRAM_WEBHOOK_SECRET"] = secrets.token_hex(32)
     print(f"  Generated: {config['TELEGRAM_WEBHOOK_SECRET'][:16]}...")
 
@@ -112,10 +112,7 @@ def main() -> None:
     heading("OAuth Callback URL")
     print("For local dev, use ngrok: ngrok http 8000")
     print("Then use the https URL ngrok gives you.\n")
-    config["OAUTH_CALLBACK_BASE_URL"] = ask(
-        "Your public HTTPS URL",
-        "https://your-ngrok-url.ngrok.io"
-    )
+    config["OAUTH_CALLBACK_BASE_URL"] = ask("Your public HTTPS URL", "https://your-ngrok-url.ngrok.io")
 
     # ── Write .env ──────────────────────────────────────────────────────────
     heading("Writing .env file")

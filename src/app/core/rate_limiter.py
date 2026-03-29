@@ -32,7 +32,7 @@ class LimitType(StrEnum):
     SCHEDULE = "sched"
 
 
-class RateLimitExceeded(Exception):
+class RateLimitExceededError(Exception):
     """Raised when a user exceeds a rate limit."""
 
     def __init__(self, limit_type: LimitType, retry_after_seconds: int) -> None:
@@ -42,10 +42,7 @@ class RateLimitExceeded(Exception):
 
     def user_message(self) -> str:
         if self.limit_type == LimitType.MESSAGE:
-            return (
-                f"You're sending messages too fast. "
-                f"Please wait {self.retry_after_seconds} seconds."
-            )
+            return f"You're sending messages too fast. " f"Please wait {self.retry_after_seconds} seconds."
         elif self.limit_type == LimitType.GENERATION:
             minutes = self.retry_after_seconds // 60
             return (
@@ -63,12 +60,12 @@ class RateLimitExceeded(Exception):
 async def check_rate_limit(user_id: str, limit_type: LimitType) -> None:
     """
     Check if the user has exceeded a rate limit.
-    Raises RateLimitExceeded if over the limit.
+    Raises RateLimitExceededError if over the limit.
     Fails open (no exception) if Redis is unavailable.
     """
     try:
         await _check(user_id, limit_type)
-    except RateLimitExceeded:
+    except RateLimitExceededError:
         raise
     except Exception as exc:
         # Redis down or other error — fail open, log warning
@@ -121,6 +118,7 @@ async def _sliding_window(
         # Calculate retry-after: seconds until next window
         next_window = (window_start + 1) * window_seconds
         retry_after = max(1, next_window - int(time.time()))
-        raise RateLimitExceeded(LimitType(prefix), retry_after)
+        raise RateLimitExceededError(LimitType(prefix), retry_after)
 
-# TODO: Exception name `RateLimitExceeded` should be named with an Error suffix
+
+# TODO: Exception name `RateLimitExceededError` should be named with an Error suffix

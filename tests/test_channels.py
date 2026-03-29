@@ -6,14 +6,13 @@ Tests for channel adapters — signature verification and message parsing.
 No network calls — all pure unit tests.
 """
 
-
-import pytest
 import httpx
+import pytest
 
 from app.channels.base import MessageType
 from app.channels.telegram import (
-    _split_message,
     _should_retry_without_parse_mode,
+    _split_message,
     parse_telegram_update,
     verify_telegram_signature,
 )
@@ -31,6 +30,7 @@ class TestTelegramSignature:
         monkeypatch.setenv("TELEGRAM_WEBHOOK_SECRET", "my-secret-token-12345678901234")
 
         from app.config import get_settings
+
         get_settings.cache_clear()
 
         with pytest.MonkeyPatch().context() as mp:
@@ -51,6 +51,8 @@ class TestTelegramSignature:
             get_settings.cache_clear()
 
     def test_invalid_signature(self, monkeypatch):
+        from app.config import get_settings
+
         with pytest.MonkeyPatch().context() as mp:
             mp.setenv("TELEGRAM_WEBHOOK_SECRET", "correct-secret-12345678901234567")
             mp.setenv("TELEGRAM_BOT_TOKEN", "123:abc")
@@ -70,6 +72,7 @@ class TestTelegramSignature:
 
     def test_missing_signature(self):
         from app.config import get_settings
+
         get_settings.cache_clear()
         # Should return False without crashing
         # We won't test the actual value since we can't easily mock settings here,
@@ -240,6 +243,7 @@ class TestWhatsAppChallenge:
             mp.setenv("OAUTH_CALLBACK_BASE_URL", "https://example.com")
 
             from app.config import get_settings
+
             get_settings.cache_clear()
             result = verify_whatsapp_challenge("subscribe", "my_verify_token", "abc123")
             assert result == "abc123"
@@ -259,6 +263,7 @@ class TestWhatsAppChallenge:
             mp.setenv("OAUTH_CALLBACK_BASE_URL", "https://example.com")
 
             from app.config import get_settings
+
             get_settings.cache_clear()
             result = verify_whatsapp_challenge("subscribe", "wrong_token", "abc123")
             assert result is None
@@ -277,22 +282,28 @@ class TestWhatsAppParsing:
     def make_wa_payload(self, text: str, phone: str = "919876543210", msg_id: str = "wamid.001") -> dict:
         return {
             "object": "whatsapp_business_account",
-            "entry": [{
-                "id": "entry_1",
-                "changes": [{
-                    "value": {
-                        "messaging_product": "whatsapp",
-                        "messages": [{
-                            "id": msg_id,
-                            "from": phone,
-                            "type": "text",
-                            "text": {"body": text},
-                            "timestamp": "1700000000",
-                        }],
-                    },
-                    "field": "messages",
-                }],
-            }],
+            "entry": [
+                {
+                    "id": "entry_1",
+                    "changes": [
+                        {
+                            "value": {
+                                "messaging_product": "whatsapp",
+                                "messages": [
+                                    {
+                                        "id": msg_id,
+                                        "from": phone,
+                                        "type": "text",
+                                        "text": {"body": text},
+                                        "timestamp": "1700000000",
+                                    }
+                                ],
+                            },
+                            "field": "messages",
+                        }
+                    ],
+                }
+            ],
         }
 
     def test_plain_text_message(self):
@@ -321,14 +332,18 @@ class TestWhatsAppParsing:
     def test_status_update_returns_none(self):
         payload = {
             "object": "whatsapp_business_account",
-            "entry": [{
-                "changes": [{
-                    "value": {
-                        "statuses": [{"id": "msg1", "status": "delivered"}],
-                    },
-                    "field": "messages",
-                }],
-            }],
+            "entry": [
+                {
+                    "changes": [
+                        {
+                            "value": {
+                                "statuses": [{"id": "msg1", "status": "delivered"}],
+                            },
+                            "field": "messages",
+                        }
+                    ],
+                }
+            ],
         }
         msg = parse_whatsapp_payload(payload)
         assert msg is None
@@ -350,18 +365,24 @@ class TestWhatsAppParsing:
     def test_non_text_message_returns_none(self):
         payload = {
             "object": "whatsapp_business_account",
-            "entry": [{
-                "changes": [{
-                    "value": {
-                        "messages": [{
-                            "id": "img_001",
-                            "from": "919876543210",
-                            "type": "image",
-                            "image": {"id": "img_id"},
-                        }],
-                    },
-                }],
-            }],
+            "entry": [
+                {
+                    "changes": [
+                        {
+                            "value": {
+                                "messages": [
+                                    {
+                                        "id": "img_001",
+                                        "from": "919876543210",
+                                        "type": "image",
+                                        "image": {"id": "img_id"},
+                                    }
+                                ],
+                            },
+                        }
+                    ],
+                }
+            ],
         }
         msg = parse_whatsapp_payload(payload)
         assert msg is None

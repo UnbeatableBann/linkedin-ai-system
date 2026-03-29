@@ -11,8 +11,6 @@ Covers:
   - check_post_length metadata
 """
 
-import pytest
-
 from app.content.post_rules import LINKEDIN_MAX_CHARS, check_post_length, enforce_post_rules
 
 

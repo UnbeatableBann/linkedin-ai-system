@@ -78,6 +78,7 @@ def create_app() -> FastAPI:
 
     # ── Scalar docs ───────────────────────────────────────────────────────────────
     if not settings.is_production:
+
         @app.get("/scalar", include_in_schema=False)
         async def scalar_docs():
             from scalar_fastapi import get_scalar_api_reference

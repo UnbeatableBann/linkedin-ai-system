@@ -130,7 +130,8 @@ async def handle_collecting(
     """
     Handle messages in COLLECTING state — gathering post parameters.
     """
-    text = msg.text.strip().lower()
+    raw_text = msg.text.strip()
+    text = raw_text.lower()
 
     # User wants to skip questions
     if any(phrase in text for phrase in SKIP_PHRASES):
@@ -149,7 +150,8 @@ async def handle_collecting(
             await sender.send_text(
                 msg.channel_user_id,
                 "I didn't quite catch the tone.\n\n"
-                "Pick *1-4* or describe it in a few words like `bold and opinionated` or `friendly and simple`.",
+                "Pick *1-4* or describe it in a few words like"
+                "`bold and opinionated` or `friendly and simple`.",
             )
             await _ask_tone(sender, msg.channel_user_id)
             return
@@ -165,7 +167,8 @@ async def handle_collecting(
             await sender.send_text(
                 msg.channel_user_id,
                 "I didn't quite catch the audience.\n\n"
-                "Pick *1-4* or describe the audience like `backend engineers`, `job seekers`, or `early-stage founders`.",
+                "Pick *1-4* or describe the audience like"
+                "`backend engineers`, `job seekers`, or `early-stage founders`.",
             )
             await _ask_audience(sender, msg.channel_user_id)
             return
@@ -180,8 +183,7 @@ async def handle_collecting(
         if length_pref is None:
             await sender.send_text(
                 msg.channel_user_id,
-                "I didn't catch the length.\n\n"
-                "Reply with *1*, *2*, *3*, or say *go* to use medium.",
+                "I didn't catch the length.\n\n" "Reply with *1*, *2*, *3*, or say *go* to use medium.",
             )
             await _ask_length(sender, msg.channel_user_id)
             return

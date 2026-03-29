@@ -93,8 +93,7 @@ async def get_or_create_user(channel: str, channel_user_id: str) -> UUID:
         row = _extract_row(retry)
         if row is None:
             raise RuntimeError(
-                "Failed to resolve user after upsert "
-                f"for channel={channel} channel_user_id={channel_user_id}"
+                "Failed to resolve user after upsert " f"for channel={channel} channel_user_id={channel_user_id}"
             )
         return UUID(row["id"])
 

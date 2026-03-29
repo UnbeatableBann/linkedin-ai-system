@@ -31,6 +31,7 @@ def build_generation_system_prompt(
 
     # Build style memory context if we have learned from past posts
     from app.content.style_memory import build_style_context
+
     style_context = build_style_context(style_prefs)
 
     example_section = ""
@@ -96,7 +97,7 @@ Length: {length_pref or 'medium, around 300 words'}"""
 
 def build_refinement_system_prompt(style_prefs: dict[str, Any]) -> str:
     """System prompt for refining an existing draft."""
-    return """You are an expert LinkedIn content editor. 
+    return """You are an expert LinkedIn content editor.
 Your job is to refine an existing LinkedIn post based on the user's feedback.
 
 Rules:
@@ -107,7 +108,7 @@ Rules:
 
 LinkedIn best practices:
 - Strong first-line hook
-- Short paragraphs with line breaks  
+- Short paragraphs with line breaks
 - No jargon
 - First person, authentic tone"""
 

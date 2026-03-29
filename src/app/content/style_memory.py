@@ -40,8 +40,6 @@ def extract_style_signals(content: str) -> dict[str, Any]:
     signals["hashtags_sample"] = hashtags[:5]
 
     # Ends with question (CTA signal)
-    sentences = re.split(r"[.!?]", content)
-    last_sentence = sentences[-2].strip() if len(sentences) >= 2 else ""
     signals["ends_with_question"] = "?" in content[-100:]
 
     # Uses numbered lists
@@ -58,11 +56,11 @@ def extract_style_signals(content: str) -> dict[str, Any]:
     # Emoji usage
     emoji_pattern = re.compile(
         "["
-        "\U0001F600-\U0001F64F"
-        "\U0001F300-\U0001F5FF"
-        "\U0001F680-\U0001F6FF"
-        "\U0001F1E0-\U0001F1FF"
-        "\U00002702-\U000027B0"
+        "\U0001f600-\U0001f64f"
+        "\U0001f300-\U0001f5ff"
+        "\U0001f680-\U0001f6ff"
+        "\U0001f1e0-\U0001f1ff"
+        "\U00002702-\U000027b0"
         "]+",
         flags=re.UNICODE,
     )
@@ -99,7 +97,13 @@ def merge_style_prefs(
             prefs[f"avg_{key}"] = (old_avg * (n - 1) + new_signals[key]) / n
 
     # Boolean signals — majority vote (>50% of posts)
-    for key in ("ends_with_question", "uses_numbered_list", "uses_bullets", "short_hook", "uses_emojis"):
+    for key in (
+        "ends_with_question",
+        "uses_numbered_list",
+        "uses_bullets",
+        "short_hook",
+        "uses_emojis",
+    ):
         if key in new_signals:
             old_rate = prefs.get(f"rate_{key}", 0.0)
             prefs[f"rate_{key}"] = (old_rate * (n - 1) + (1.0 if new_signals[key] else 0.0)) / n
@@ -132,13 +136,7 @@ async def update_style_from_post(user_id: str, content: str) -> None:
     db = await get_db()
 
     # Load current prefs
-    result = await (
-        db.table("users")
-        .select("style_prefs")
-        .eq("id", user_id)
-        .single()
-        .execute()
-    )
+    result = await db.table("users").select("style_prefs").eq("id", user_id).single().execute()
     current_prefs = result.data.get("style_prefs", {}) if result and result.data else {}
 
     # Extract and merge

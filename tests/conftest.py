@@ -4,10 +4,11 @@ tests/conftest.py
 Shared pytest fixtures available to all tests.
 """
 
-import pytest
-from cryptography.fernet import Fernet
+from datetime import UTC
 from unittest.mock import MagicMock
 
+import pytest
+from cryptography.fernet import Fernet
 
 TEST_FERNET_KEY = Fernet.generate_key().decode()
 
@@ -36,6 +37,7 @@ def mock_settings(monkeypatch):
     monkeypatch.setenv("APP_ENV", "development")
 
     from app.config import get_settings
+
     get_settings.cache_clear()
     yield
     get_settings.cache_clear()
@@ -81,10 +83,12 @@ def mock_db():
 @pytest.fixture()
 def sample_user_row():
     """A fully configured UserRow for testing."""
-    from app.db.models import LLMProvider, UserRow, Channel
+    from datetime import datetime
     from uuid import uuid4
-    from datetime import datetime, timezone
+
     from cryptography.fernet import Fernet
+
+    from app.db.models import Channel, LLMProvider, UserRow
 
     fernet = Fernet(TEST_FERNET_KEY.encode())
     encrypted_llm_key = fernet.encrypt(b"sk-ant-test-key").decode()
@@ -103,5 +107,5 @@ def sample_user_row():
         timezone="Asia/Kolkata",
         style_prefs={"tone": "thought leadership", "audience": "founders"},
         is_active=True,
-        created_at=datetime.now(timezone.utc),
+        created_at=datetime.now(UTC),
     )

@@ -24,6 +24,7 @@ def _fernet() -> Fernet:
     except Exception:
         # Direct env var fallback (used in tests when pydantic is mocked)
         import os
+
         key = os.environ.get("FERNET_SECRET_KEY", "")
         if not key:
             raise RuntimeError("FERNET_SECRET_KEY not set")
@@ -52,7 +53,8 @@ def decrypt(token: str) -> str:
 class EncryptionError(Exception):
     """Raised when decryption fails due to key mismatch or corruption."""
 
-#TODO:
+
+# TODO:
 # 1. Key rotation is not handled
 # 2. No TTL / expiration use
 # 3. It is not production-grade for key lifecycle management

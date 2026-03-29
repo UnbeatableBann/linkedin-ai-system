@@ -32,14 +32,18 @@ async def is_duplicate(msg: NormalisedMessage) -> bool:
     key = msg.idempotency_key
 
     try:
-        await db.table("webhook_log").insert(
-            {
-                "idempotency_key": key,
-                "channel": msg.channel,
-                "user_channel_id": msg.channel_user_id,
-                "payload": msg.raw,
-            }
-        ).execute()
+        await (
+            db.table("webhook_log")
+            .insert(
+                {
+                    "idempotency_key": key,
+                    "channel": msg.channel,
+                    "user_channel_id": msg.channel_user_id,
+                    "payload": msg.raw,
+                }
+            )
+            .execute()
+        )
         logger.debug("dedup.new", key=key)
         return False  # New message — process it
 

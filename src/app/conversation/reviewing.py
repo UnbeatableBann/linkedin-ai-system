@@ -121,7 +121,8 @@ async def handle_reviewing(
         await sender.send_text(
             msg.channel_user_id,
             "I didn't quite catch that.\n\n"
-            "Reply with *approve*, *post now*, *schedule*, *discard*, or give an edit instruction like `make it shorter`.",
+            "Reply with *approve*, *post now*, *schedule*, *discard*,"
+            " or give an edit instruction like `make it shorter`.",
         )
         return
 
@@ -199,7 +200,19 @@ async def _handle_publish_now(
 
 
 def _is_approval(text: str) -> bool:
-    approval_words = {"yes", "good", "great", "perfect", "approve", "approved", "go", "ok", "okay", "ship", "send"}
+    approval_words = {
+        "yes",
+        "good",
+        "great",
+        "perfect",
+        "approve",
+        "approved",
+        "go",
+        "ok",
+        "okay",
+        "ship",
+        "send",
+    }
     words = set(text.split())
     return bool(words & approval_words)
 

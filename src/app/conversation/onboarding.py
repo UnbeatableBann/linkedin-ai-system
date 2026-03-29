@@ -1,4 +1,4 @@
-﻿"""
+"""
 app/conversation/onboarding.py
 ------------------------------
 Multi-step onboarding flow. Runs entirely inside the bot conversation.
@@ -17,7 +17,7 @@ we repeat the question for that step.
 """
 
 import asyncio
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 from app.channels.base import NormalisedMessage
 from app.core.encryption import EncryptionError, decrypt, encrypt
@@ -134,12 +134,7 @@ async def _handle_zernio_key(
         return
 
     db = await get_db()
-    await (
-        db.table("users")
-        .update({"zernio_api_key_enc": encrypt(key)})
-        .eq("id", str(user.id))
-        .execute()
-    )
+    await db.table("users").update({"zernio_api_key_enc": encrypt(key)}).eq("id", str(user.id)).execute()
 
     session.context.onboarding_step = OnboardingStep.LLM_CHOICE
     await _ask_llm_choice(sender, msg.channel_user_id)
@@ -294,12 +289,7 @@ async def _start_linkedin_oauth(
                 name=f"User {str(user.id)[:8]}",
                 description="LinkedIn AI Content System",
             )
-            await (
-                db.table("users")
-                .update({"zernio_profile_id": profile.id})
-                .eq("id", str(user.id))
-                .execute()
-            )
+            await db.table("users").update({"zernio_profile_id": profile.id}).eq("id", str(user.id)).execute()
             profile_id = profile.id
         else:
             profile_id = user_data["zernio_profile_id"]
@@ -308,7 +298,7 @@ async def _start_linkedin_oauth(
             profile_id=profile_id,
             redirect_url=settings.oauth_callback_url,
         )
-        session.context.connect_token_issued_at = datetime.now(timezone.utc).isoformat()
+        session.context.connect_token_issued_at = datetime.now(UTC).isoformat()
 
     except (ZernioError, EncryptionError) as exc:
         await sender.send_text(
@@ -352,7 +342,7 @@ async def _handle_linkedin_oauth_wait(
     issued_at_str = session.context.connect_token_issued_at
     if issued_at_str:
         issued_at = datetime.fromisoformat(issued_at_str)
-        elapsed_minutes = (datetime.now(timezone.utc) - issued_at).total_seconds() / 60
+        elapsed_minutes = (datetime.now(UTC) - issued_at).total_seconds() / 60
         settings = get_settings()
         if elapsed_minutes > settings.zernio_connect_token_ttl_minutes:
             await sender.send_text(
@@ -392,7 +382,8 @@ async def _handle_linkedin_oauth_wait(
                 "1. Clicked the link\n"
                 "2. Logged in to LinkedIn\n"
                 "3. Clicked *Allow* on the permissions screen\n\n"
-                "You do not need to send *done* anymore once the callback reaches me, but you can still send any message to retry this check.",
+                "You do not need to send *done* anymore once the callback reaches me,"
+                "but you can still send any message to retry this check.",
             )
             return
 
@@ -433,9 +424,7 @@ async def _complete_linkedin_account_connection(
 ) -> None:
     """Complete LinkedIn onboarding when Zernio already gives us the connected account."""
     db = await get_db()
-    await (
-        db.table("users").update({"zernio_account_id": account_id}).eq("id", str(user.id)).execute()
-    )
+    await db.table("users").update({"zernio_account_id": account_id}).eq("id", str(user.id)).execute()
 
     session.context.connect_token = None
     session.context.pending_orgs = []
@@ -500,11 +489,7 @@ async def _continue_linkedin_onboarding(
             status_code=getattr(exc, "status_code", None),
             error=str(exc),
         )
-        if (
-            isinstance(exc, ZernioError)
-            and exc.status_code is not None
-            and 400 <= exc.status_code < 500
-        ):
+        if isinstance(exc, ZernioError) and exc.status_code is not None and 400 <= exc.status_code < 500:
             await sender.send_text(
                 channel_user_id,
                 "I couldn't load your LinkedIn accounts from that authorisation.\n\n"
@@ -561,13 +546,7 @@ async def _handle_linkedin_org_select(
     selected_org = orgs[idx]
 
     db = await get_db()
-    user_data = (
-        await db.table("users")
-        .select("zernio_api_key_enc")
-        .eq("id", str(user.id))
-        .single()
-        .execute()
-    ).data
+    user_data = (await db.table("users").select("zernio_api_key_enc").eq("id", str(user.id)).single().execute()).data
 
     try:
         api_key = decrypt(user_data["zernio_api_key_enc"])
@@ -576,12 +555,7 @@ async def _handle_linkedin_org_select(
             connect_token=connect_token,
             org_id=selected_org["id"],
         )
-        await (
-            db.table("users")
-            .update({"zernio_account_id": account.id})
-            .eq("id", str(user.id))
-            .execute()
-        )
+        await db.table("users").update({"zernio_account_id": account.id}).eq("id", str(user.id)).execute()
 
     except (ZernioError, EncryptionError) as exc:
         await sender.send_text(
@@ -735,14 +709,13 @@ async def _verify_llm_key(provider: LLMProvider, model: str, key: str) -> bool:
             )
 
         elif provider == LLMProvider.GEMINI:
-            import google.generativeai as genai
+            from google import genai
 
-            genai.configure(api_key=key)
-            client = genai.GenerativeModel(model)
-            await asyncio.to_thread(
-                client.generate_content,
-                contents=[genai.Content(role="user", parts=[genai.Part(text="Hi")])],
-                generation_config=genai.types.GenerationConfig(max_output_tokens=10),
+            client = genai.Client(api_key=key)
+            await client.aio.models.generate_content(
+                model=model,
+                contents="Hi",
+                config=genai.types.GenerationConfig(max_output_tokens=10, response_modalities=["TEXT"]),
             )
 
         return True

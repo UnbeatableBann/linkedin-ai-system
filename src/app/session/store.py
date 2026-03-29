@@ -75,9 +75,7 @@ async def save_session(session: Session) -> None:
 
     from datetime import timedelta
 
-    new_expires = (
-        datetime.now(UTC) + timedelta(hours=settings.session_ttl_hours)
-    ).isoformat()
+    new_expires = (datetime.now(UTC) + timedelta(hours=settings.session_ttl_hours)).isoformat()
 
     await (
         db.table("sessions")
@@ -110,9 +108,7 @@ async def _upsert_session_row(user_id: UUID) -> dict:
     settings = get_settings()
     from datetime import timedelta
 
-    expires_at = (
-        datetime.now(UTC) + timedelta(hours=settings.session_ttl_hours)
-    ).isoformat()
+    expires_at = (datetime.now(UTC) + timedelta(hours=settings.session_ttl_hours)).isoformat()
 
     result = await (
         db.table("sessions")
@@ -132,13 +128,7 @@ async def _upsert_session_row(user_id: UUID) -> dict:
 
     if not result or not result.data:
         # If duplicate rows were ignored and representation is empty, fetch the row directly.
-        fallback = await (
-            db.table("sessions")
-            .select("*")
-            .eq("user_id", str(user_id))
-            .single()
-            .execute()
-        )
+        fallback = await db.table("sessions").select("*").eq("user_id", str(user_id)).single().execute()
         row = _extract_row(fallback)
         if row is None:
             raise RuntimeError(f"Failed to fetch or create session for user {user_id}")
@@ -155,9 +145,7 @@ async def _reset_session(user_id: UUID, session_id: str) -> Session:
     settings = get_settings()
     from datetime import timedelta
 
-    expires_at = (
-        datetime.now(UTC) + timedelta(hours=settings.session_ttl_hours)
-    ).isoformat()
+    expires_at = (datetime.now(UTC) + timedelta(hours=settings.session_ttl_hours)).isoformat()
 
     await (
         db.table("sessions")

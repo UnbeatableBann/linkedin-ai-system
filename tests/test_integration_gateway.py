@@ -11,11 +11,11 @@ All external services (Supabase, Telegram API, Celery) are mocked.
 The FSM, parsing, and session logic run for real.
 """
 
-import pytest
-from datetime import datetime, timedelta, timezone
-from unittest.mock import AsyncMock, MagicMock, patch
+from datetime import UTC, datetime, timedelta
+from unittest.mock import MagicMock, patch
 from uuid import uuid4
 
+import pytest
 
 # ── Fixtures ──────────────────────────────────────────────────────────────
 
@@ -53,30 +53,38 @@ def telegram_start_payload():
 def whatsapp_text_payload():
     return {
         "object": "whatsapp_business_account",
-        "entry": [{
-            "id": "123",
-            "changes": [{
-                "value": {
-                    "messaging_product": "whatsapp",
-                    "messages": [{
-                        "id": "wamid.test_001",
-                        "from": "919876543210",
-                        "type": "text",
-                        "text": {"body": "Write a post about startup lessons"},
-                        "timestamp": "1700000000",
-                    }],
-                },
-                "field": "messages",
-            }],
-        }],
+        "entry": [
+            {
+                "id": "123",
+                "changes": [
+                    {
+                        "value": {
+                            "messaging_product": "whatsapp",
+                            "messages": [
+                                {
+                                    "id": "wamid.test_001",
+                                    "from": "919876543210",
+                                    "type": "text",
+                                    "text": {"body": "Write a post about startup lessons"},
+                                    "timestamp": "1700000000",
+                                }
+                            ],
+                        },
+                        "field": "messages",
+                    }
+                ],
+            }
+        ],
     }
 
 
 @pytest.fixture
 def existing_user():
-    from app.db.models import UserRow, Channel, LLMProvider
-    from cryptography.fernet import Fernet
     import os
+
+    from cryptography.fernet import Fernet
+
+    from app.db.models import Channel, LLMProvider, UserRow
 
     key = Fernet.generate_key()
     fernet = Fernet(key)
@@ -92,6 +100,7 @@ def existing_user():
     os.environ.setdefault("OAUTH_CALLBACK_BASE_URL", "https://example.com")
 
     from app.config import get_settings
+
     get_settings.cache_clear()
 
     return UserRow(
@@ -107,7 +116,7 @@ def existing_user():
         timezone="Asia/Kolkata",
         style_prefs={},
         is_active=True,
-        created_at=datetime.now(timezone.utc),
+        created_at=datetime.now(UTC),
     )
 
 
@@ -118,8 +127,8 @@ class TestTelegramPayloadParsing:
     """Test that Telegram payloads are correctly parsed end-to-end."""
 
     def test_text_message_full_pipeline(self, telegram_text_payload):
-        from app.channels.telegram import parse_telegram_update
         from app.channels.base import MessageType
+        from app.channels.telegram import parse_telegram_update
 
         msg = parse_telegram_update(telegram_text_payload)
 
@@ -132,8 +141,8 @@ class TestTelegramPayloadParsing:
         assert msg.idempotency_key == "telegram:42"
 
     def test_start_command_full_pipeline(self, telegram_start_payload):
-        from app.channels.telegram import parse_telegram_update
         from app.channels.base import MessageType
+        from app.channels.telegram import parse_telegram_update
 
         msg = parse_telegram_update(telegram_start_payload)
 
@@ -152,8 +161,8 @@ class TestTelegramPayloadParsing:
 
 class TestWhatsAppPayloadParsing:
     def test_text_message_full_pipeline(self, whatsapp_text_payload):
-        from app.channels.whatsapp import parse_whatsapp_payload
         from app.channels.base import MessageType
+        from app.channels.whatsapp import parse_whatsapp_payload
 
         msg = parse_whatsapp_payload(whatsapp_text_payload)
 
@@ -237,8 +246,8 @@ class TestFSMSessionIntegration:
     """Test FSM transitions integrated with session context."""
 
     def test_idle_to_collecting_with_context(self):
-        from app.session.fsm import transition, Event
-        from app.session.models import SessionState, SessionContext
+        from app.session.fsm import Event, transition
+        from app.session.models import SessionContext, SessionState
 
         state = SessionState.IDLE
         ctx = SessionContext()
@@ -254,8 +263,8 @@ class TestFSMSessionIntegration:
 
     def test_full_happy_path_state_sequence(self):
         """Walk through the complete happy path: IDLE → post → publish."""
-        from app.session.fsm import transition, Event
-        from app.session.models import SessionState, SessionContext
+        from app.session.fsm import Event, transition
+        from app.session.models import SessionContext, SessionState
 
         state = SessionState.IDLE
         ctx = SessionContext()
@@ -303,8 +312,8 @@ class TestFSMSessionIntegration:
         assert ctx.draft_version == 0
 
     def test_cancel_at_any_point_resets_context(self):
-        from app.session.fsm import transition, Event
-        from app.session.models import SessionState, SessionContext
+        from app.session.fsm import Event, transition
+        from app.session.models import SessionContext, SessionState
 
         # Set up a mid-review session
         state = SessionState.REVIEWING
@@ -322,8 +331,7 @@ class TestFSMSessionIntegration:
         assert ctx.draft_content is None
 
     def test_pending_message_during_generation(self):
-        from app.session.models import SessionContext, SessionState
-        from app.session.fsm import SessionState
+        from app.session.models import SessionContext
 
         ctx = SessionContext()
         ctx.pending_message = None
@@ -352,8 +360,11 @@ class TestContentPipelineIntegration:
         # Build up style prefs from multiple posts
         prefs = {}
         prefs = merge_style_prefs(prefs, {"word_count": 150, "ends_with_question": True})
-        prefs = merge_style_prefs(prefs, {"word_count": 200, "ends_with_question": True},
-                                  example_post="Example post about growth.")
+        prefs = merge_style_prefs(
+            prefs,
+            {"word_count": 200, "ends_with_question": True},
+            example_post="Example post about growth.",
+        )
 
         prompt = build_generation_system_prompt(
             tone="storytelling",
@@ -397,8 +408,12 @@ class TestContentPipelineIntegration:
 
     def test_style_signals_flow_into_prompts(self):
         """End-to-end: signals → prefs → prompt context."""
-        from app.content.style_memory import extract_style_signals, merge_style_prefs, build_style_context
         from app.content.prompts import build_generation_system_prompt
+        from app.content.style_memory import (
+            build_style_context,
+            extract_style_signals,
+            merge_style_prefs,
+        )
 
         post = "I built a startup in 2024.\n\nHere's what I learned:\n1. Focus\n2. Speed\n3. People\n\n#Startups"
         signals = extract_style_signals(post)
@@ -456,70 +471,71 @@ class TestReviewingIntegration:
 
 class TestSchedulingIntegration:
     def test_auto_slot_is_in_future(self):
-        from datetime import datetime, timezone
+        from datetime import datetime
+
         import pytz
+
         from app.conversation.scheduling import _next_auto_slot
 
-        IST = pytz.timezone("Asia/Kolkata")
-        slot = _next_auto_slot(IST)
+        ist = pytz.timezone("Asia/Kolkata")
+        slot = _next_auto_slot(ist)
 
-        assert slot > datetime.now(timezone.utc)
+        assert slot > datetime.now(UTC)
 
     def test_auto_slot_is_weekday(self):
         import pytz
+
         from app.conversation.scheduling import _next_auto_slot
 
-        IST = pytz.timezone("Asia/Kolkata")
-        slot = _next_auto_slot(IST)
-        local = slot.astimezone(IST)
+        ist = pytz.timezone("Asia/Kolkata")
+        slot = _next_auto_slot(ist)
+        local = slot.astimezone(ist)
 
         assert local.weekday() in {0, 4}  # Mon or Fri
 
     def test_format_slot_readable(self):
-        from datetime import datetime, timezone
+        from datetime import datetime
+
         import pytz
+
         from app.conversation.scheduling import _format_dt
 
-        IST = pytz.timezone("Asia/Kolkata")
-        dt = datetime(2025, 4, 7, 3, 30, 0, tzinfo=timezone.utc)  # 9am IST Monday
-        result = _format_dt(dt, IST)
+        ist = pytz.timezone("Asia/Kolkata")
+        dt = datetime(2025, 4, 7, 3, 30, 0, tzinfo=UTC)  # 9am IST Monday
+        result = _format_dt(dt, ist)
 
         assert isinstance(result, str)
         assert len(result) > 10
 
     @pytest.mark.asyncio
     async def test_no_conflict_returns_false(self):
-        from datetime import datetime, timedelta, timezone
+        from datetime import datetime
+
         from app.conversation.scheduling import _check_conflict
 
         mock_db = MagicMock()
-        mock_db.table.return_value.select.return_value.eq.return_value.eq.return_value\
-            .in_.return_value.gte.return_value.lte.return_value.execute.return_value = \
-            MagicMock(data=[])
+        mock_db.table.return_value.select.return_value.eq.return_value.eq.return_value.in_.return_value.gte.return_value.lte.return_value.execute.return_value = MagicMock(  # noqa: E501
+            data=[]
+        )
 
         with patch("app.conversation.scheduling.get_db", return_value=mock_db):
-            result = await _check_conflict(
-                "user_123",
-                datetime.now(timezone.utc) + timedelta(days=3)
-            )
+            result = await _check_conflict("user_123", datetime.now(UTC) + timedelta(days=3))
 
         assert result is False
 
     @pytest.mark.asyncio
     async def test_conflict_detected(self):
-        from datetime import datetime, timedelta, timezone
+        from datetime import datetime
+
         from app.conversation.scheduling import _check_conflict
 
         mock_db = MagicMock()
-        mock_db.table.return_value.select.return_value.eq.return_value.eq.return_value\
-            .in_.return_value.gte.return_value.lte.return_value.execute.return_value = \
-            MagicMock(data=[{"id": "existing_post_id"}])
+        mock_db.table.return_value.select.return_value.eq.return_value.eq.return_value.in_.return_value.gte.return_value.lte.return_value.execute.return_value = MagicMock(  # noqa: E501
+            data=[{"id": "existing_post_id"}]
+        )
 
         with patch("app.conversation.scheduling.get_db", return_value=mock_db):
-            result = await _check_conflict(
-                "user_123",
-                datetime.now(timezone.utc) + timedelta(days=3)
-            )
+            result = await _check_conflict("user_123", datetime.now(UTC) + timedelta(days=3))
 
         assert result is True
 
@@ -545,9 +561,9 @@ class TestErrorHandlingIntegration:
         assert not_retryable.retryable is False
 
     def test_rate_limit_error_user_message(self):
-        from app.core.rate_limiter import RateLimitExceeded, LimitType
+        from app.core.rate_limiter import LimitType, RateLimitExceededError
 
-        exc = RateLimitExceeded(LimitType.MESSAGE, retry_after_seconds=45)
+        exc = RateLimitExceededError(LimitType.MESSAGE, retry_after_seconds=45)
         msg = exc.user_message()
 
         assert isinstance(msg, str)
@@ -579,12 +595,13 @@ class TestErrorHandlingIntegration:
 
         cases = {
             "zernio_key": "Zernio",
-            "llm_key":    "AI",
-            "linkedin":   "LinkedIn",
-            "timezone":   "timezone",
+            "llm_key": "AI",
+            "linkedin": "LinkedIn",
+            "timezone": "timezone",
         }
         for missing, expected_word in cases.items():
             exc = ConfigurationError(missing)
             msg = exc.user_message()
-            assert expected_word.lower() in msg.lower(), \
-                f"ConfigurationError('{missing}') message should mention '{expected_word}'"
+            assert (
+                expected_word.lower() in msg.lower()
+            ), f"ConfigurationError('{missing}') message should mention '{expected_word}'"

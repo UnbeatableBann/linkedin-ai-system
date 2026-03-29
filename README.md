@@ -5,6 +5,7 @@ AI-powered LinkedIn post generation and scheduling via Telegram and WhatsApp.
 ## What it does
 
 Users chat with a Telegram or WhatsApp bot to:
+
 - Generate LinkedIn posts from a topic or rough idea
 - Refine drafts interactively (tone, length, hashtags, etc.)
 - Schedule posts for specific times or auto Mon/Fri
@@ -17,7 +18,7 @@ Each user brings their own LLM API key (Anthropic, OpenAI, or Groq) and their ow
 ## Prerequisites
 
 | Requirement | Where to get it |
-|---|---|
+| --- | --- |
 | Docker + Docker Compose | docker.com |
 | Python 3.12+ (for scripts) | python.org |
 | Supabase account | app.supabase.com |
@@ -66,6 +67,7 @@ docker-compose up --build
 ```
 
 This starts:
+
 - **api** — FastAPI on port 8000
 - **worker** — Celery worker (LLM generation + publishing)
 - **beat** — Celery Beat (scheduled jobs)
@@ -80,6 +82,7 @@ uv run python scripts/register_telegram_webhook.py
 ### 7. Register WhatsApp webhook
 
 In Meta Developer Console → your app → WhatsApp → Configuration:
+
 - **Webhook URL:** `https://your-ngrok-url.ngrok.io/webhooks/whatsapp`
 - **Verify token:** value of `WHATSAPP_VERIFY_TOKEN` in your `.env`
 - **Subscribe to:** `messages`
@@ -137,7 +140,7 @@ See `.env.example` for all required variables with descriptions.
 Key variables:
 
 | Variable | Description |
-|---|---|
+| ---------- | ------------- |
 | `FERNET_SECRET_KEY` | AES encryption key for API keys at rest. **Back this up.** |
 | `SUPABASE_SERVICE_KEY` | Full-access DB key. Never expose publicly. |
 | `TELEGRAM_BOT_TOKEN` | From @BotFather |
@@ -166,7 +169,7 @@ Supabase (all state persisted — survives restarts)
 ## Commands Reference
 
 | Command | Description |
-|---|---|
+| --- | --- |
 | `/start` | Begin onboarding (new) or welcome back (existing) |
 | `/new` | Start a new post draft |
 | `/cancel` | Cancel current operation |

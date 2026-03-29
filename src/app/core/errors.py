@@ -13,11 +13,11 @@ Error hierarchy:
     ├── LLMError             — from llm_client.py (re-exported here)
     ├── ZernioError          — from zernio/client.py (re-exported here)
     ├── SessionError         — session not found / expired
-    └── RateLimitExceeded    — from rate_limiter.py (re-exported here)
+    └── RateLimitExceededError    — from rate_limiter.py (re-exported here)
 """
 
 from app.content.llm_client import LLMError
-from app.core.rate_limiter import RateLimitExceeded
+from app.core.rate_limiter import RateLimitExceededError
 from app.zernio.client import ZernioError
 
 
@@ -70,7 +70,7 @@ def format_error_for_user(exc: Exception) -> str:
         return str(exc)
     if isinstance(exc, ZernioError):
         return str(exc)
-    if isinstance(exc, RateLimitExceeded):
+    if isinstance(exc, RateLimitExceededError):
         return exc.user_message()
 
     # Generic fallback — never expose internals

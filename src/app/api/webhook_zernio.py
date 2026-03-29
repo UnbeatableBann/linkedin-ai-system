@@ -67,11 +67,7 @@ async def _handle_zernio_event(event: str, zernio_post_id: str, post_data: dict)
 
     # Find our post by zernio_post_id
     result = await (
-        db.table("posts")
-        .select("id, user_id, status")
-        .eq("zernio_post_id", zernio_post_id)
-        .maybe_single()
-        .execute()
+        db.table("posts").select("id, user_id, status").eq("zernio_post_id", zernio_post_id).maybe_single().execute()
     )
 
     if not result or not result.data:
@@ -85,10 +81,7 @@ async def _handle_zernio_event(event: str, zernio_post_id: str, post_data: dict)
     if event == "post.published":
         published_at = post_data.get("publishedAt") or datetime.now(datetime.UTC).isoformat()
         await (
-            db.table("posts")
-            .update({"status": "published", "published_at": published_at})
-            .eq("id", post_id)
-            .execute()
+            db.table("posts").update({"status": "published", "published_at": published_at}).eq("id", post_id).execute()
         )
         logger.info("zernio_webhook.post_published", post_id=post_id)
 
@@ -115,13 +108,7 @@ async def _notify_user_of_failure(user_id: str, post_id: str, error: str) -> Non
     from app.db.client import get_db
 
     db = await get_db()
-    result = await (
-        db.table("users")
-        .select("channel, channel_user_id")
-        .eq("id", user_id)
-        .maybe_single()
-        .execute()
-    )
+    result = await db.table("users").select("channel, channel_user_id").eq("id", user_id).maybe_single().execute()
     if not result or not result.data:
         return
 

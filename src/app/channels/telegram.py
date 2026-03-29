@@ -184,9 +184,7 @@ class TelegramSender(BaseChannelSender):
         buttons: list of (label, callback_data) pairs.
         Each button gets its own row for clarity.
         """
-        keyboard = {
-            "inline_keyboard": [[{"text": label, "callback_data": data}] for label, data in buttons]
-        }
+        keyboard = {"inline_keyboard": [[{"text": label, "callback_data": data}] for label, data in buttons]}
         async with httpx.AsyncClient(timeout=10.0) as client:
             payload = {
                 "chat_id": channel_user_id,
@@ -225,9 +223,7 @@ class TelegramSender(BaseChannelSender):
         url: str,
     ) -> None:
         """Send a message with a single URL button."""
-        keyboard = {
-            "inline_keyboard": [[{"text": label, "url": url}]]
-        }
+        keyboard = {"inline_keyboard": [[{"text": label, "url": url}]]}
         async with httpx.AsyncClient(timeout=10.0) as client:
             payload = {
                 "chat_id": channel_user_id,

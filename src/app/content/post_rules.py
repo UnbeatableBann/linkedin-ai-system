@@ -28,8 +28,8 @@ PREAMBLE_PATTERNS = [
 
 # Patterns that indicate the LLM wrapped in quotes or code blocks
 WRAPPER_PATTERNS = [
-    r'^"(.*)"$',   # "content"
-    r"^'(.*)'$",   # 'content'
+    r'^"(.*)"$',  # "content"
+    r"^'(.*)'$",  # 'content'
     r"^```.*\n(.*)\n```$",  # ```\ncontent\n```
 ]
 
@@ -148,7 +148,7 @@ def _truncate_at_sentence(text: str, max_chars: int) -> str:
     )
 
     if last_end > max_chars * 0.7:  # Only truncate at sentence if it's not too short
-        return chunk[:last_end + 1].strip()
+        return chunk[: last_end + 1].strip()
 
     # Fallback: truncate at last space
     last_space = chunk.rfind(" ")

@@ -16,7 +16,7 @@ Tasks:
 
 import asyncio
 import atexit
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 from typing import Any
 from uuid import UUID
 
@@ -164,9 +164,7 @@ async def _generate_post_async(
         # Send draft to user
         from app.conversation.reviewing import present_draft
 
-        await sender.send_text(
-            channel_user_id, present_draft(content, session.context.draft_version)
-        )
+        await sender.send_text(channel_user_id, present_draft(content, session.context.draft_version))
 
         # Process any pending message that arrived during generation
         if session.context.pending_message:
@@ -282,9 +280,7 @@ async def _refine_post_async(
         session.context.pending_message = None
         await save_session(session)
 
-        await sender.send_text(
-            channel_user_id, present_draft(refined, session.context.draft_version)
-        )
+        await sender.send_text(channel_user_id, present_draft(refined, session.context.draft_version))
 
         if pending:
             from app.channels.base import MessageType, NormalisedMessage
@@ -392,7 +388,7 @@ async def _publish_scheduled_async(
                 {
                     "status": "published",
                     "zernio_post_id": zernio_post.id,
-                    "published_at": datetime.now(timezone.utc).isoformat(),
+                    "published_at": datetime.now(tz=UTC).isoformat(),
                 }
             )
             .eq("id", post_id)
@@ -491,7 +487,7 @@ async def _publish_now_async(
                 {
                     "status": "published",
                     "zernio_post_id": zernio_post.id,
-                    "published_at": datetime.now(timezone.utc).isoformat(),
+                    "published_at": datetime.now(tz=UTC).isoformat(),
                 }
             )
             .eq("id", post_id)
@@ -510,6 +506,10 @@ async def _publish_now_async(
             f"❌ Couldn't publish: {str(exc)[:200]}\n\nPlease try again or check /settings.",
         )
 
+    except ZernioError as z_exc:
+        await sender.send_text(channel_user_id, str(z_exc))
+        raise task.retry(exc=z_exc, countdown=60)
+
 
 # ── Reminders & Maintenance ─────────────────────────────────────────────────
 
@@ -519,21 +519,13 @@ def send_reminder_task(user_id: str, post_id: str, channel: str, channel_user_id
     run_async(_send_reminder_async(user_id, post_id, channel, channel_user_id))
 
 
-async def _send_reminder_async(
-    user_id: str, post_id: str, channel: str, channel_user_id: str
-) -> None:
+async def _send_reminder_async(user_id: str, post_id: str, channel: str, channel_user_id: str) -> None:
     from app.db.client import get_db
 
     db = await get_db()
     sender = _get_sender(channel)
 
-    post_row = (
-        await db.table("posts")
-        .select("content, scheduled_for, status")
-        .eq("id", post_id)
-        .single()
-        .execute()
-    )
+    post_row = await db.table("posts").select("content, scheduled_for, status").eq("id", post_id).single().execute()
     post = post_row.data
 
     if post["status"] in ("cancelled", "published", "failed"):
@@ -561,7 +553,7 @@ async def _watchdog_stale_jobs_async() -> None:
     from app.db.client import get_db
 
     db = await get_db()
-    now = datetime.now(timezone.utc)
+    now = datetime.now(tz=UTC)
 
     stale = await (
         db.table("schedule_jobs")
@@ -574,11 +566,7 @@ async def _watchdog_stale_jobs_async() -> None:
     for job in stale.data:
         # Fetch channel info from users table so we can notify them
         user_result = await (
-            db.table("users")
-            .select("channel, channel_user_id")
-            .eq("id", job["user_id"])
-            .maybe_single()
-            .execute()
+            db.table("users").select("channel, channel_user_id").eq("id", job["user_id"]).maybe_single().execute()
         )
         if not user_result or not user_result.data:
             logger.warning("watchdog.user_not_found", job_id=job["id"])
@@ -614,7 +602,7 @@ async def _cleanup_webhook_log_async() -> None:
     from app.db.client import get_db
 
     db = await get_db()
-    cutoff = (datetime.now(timezone.utc) - timedelta(days=30)).isoformat()
+    cutoff = (datetime.now(tz=UTC) - timedelta(days=30)).isoformat()
     await db.table("webhook_log").delete().lt("processed_at", cutoff).execute()
     logger.info("cleanup.webhook_log.done", cutoff=cutoff)
 
@@ -633,14 +621,12 @@ def process_auto_schedules() -> None:
 
 
 async def _process_auto_schedules_async() -> None:
-    from datetime import datetime, timedelta, timezone
-
-    import pytz
+    from datetime import datetime, timedelta
 
     from app.db.client import get_db
 
     db = await get_db()
-    now = datetime.now(timezone.utc)
+    now = datetime.now(tz=UTC)
     lookahead = now + timedelta(hours=25)
 
     # Find all users with auto-schedule enabled
@@ -669,7 +655,7 @@ async def _check_user_auto_schedule(
     lookahead: "datetime",
 ) -> None:
     """Check one user's auto-schedule and queue a post if a slot is coming up."""
-    from datetime import datetime, timedelta, timezone
+    from datetime import datetime, timedelta
 
     import pytz
 
@@ -694,7 +680,7 @@ async def _check_user_auto_schedule(
         candidate = now_local + timedelta(days=days_ahead)
         if candidate.weekday() in days_of_week:
             slot = candidate.replace(hour=hour, minute=minute, second=0, microsecond=0)
-            slot_utc = slot.astimezone(timezone.utc)
+            slot_utc = slot.astimezone(tz=UTC)
             if now < slot_utc <= lookahead:
                 slots_in_window.append(slot_utc)
 
@@ -733,14 +719,9 @@ async def _send_auto_schedule_nudge(
     user_tz: object,
 ) -> None:
     """Send a nudge to a user reminding them to write a post for an upcoming slot."""
-    from datetime import datetime
 
     user_result = (
-        await db.table("users")
-        .select("channel, channel_user_id, is_active")
-        .eq("id", user_id)
-        .maybe_single()
-        .execute()
+        await db.table("users").select("channel, channel_user_id, is_active").eq("id", user_id).maybe_single().execute()
     )
     if not user_result or not user_result.data or not user_result.data.get("is_active"):
         return

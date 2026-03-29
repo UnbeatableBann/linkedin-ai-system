@@ -18,12 +18,12 @@ from uuid import UUID
 
 from app.channels.base import NormalisedMessage
 from app.core.logging import get_logger
-from app.core.rate_limiter import LimitType, RateLimitExceeded, check_rate_limit
+from app.core.rate_limiter import LimitType, RateLimitExceededError, check_rate_limit
 from app.db.client import get_db
 from app.db.models import UserRow
 from app.session.fsm import Event
 from app.session.models import SessionState
-from app.session.store import Session, get_or_create_session, reset_session_to_idle, save_session
+from app.session.store import Session, get_or_create_session, save_session
 
 logger = get_logger(__name__)
 
@@ -48,7 +48,7 @@ async def dispatch(user_id: UUID, msg: NormalisedMessage) -> None:
     try:
         await check_rate_limit(str(user_id), LimitType.MESSAGE)
     except Exception as rate_exc:
-        if isinstance(rate_exc, RateLimitExceeded):
+        if isinstance(rate_exc, RateLimitExceededError):
             await sender.send_text(msg.channel_user_id, rate_exc.user_message())
             return
 
@@ -100,6 +100,7 @@ async def dispatch(user_id: UUID, msg: NormalisedMessage) -> None:
     except Exception as exc:
         logger.exception("dispatcher.unhandled_error", error=str(exc), state=session.state)
         from app.core.errors import format_error_for_user
+
         await sender.send_text(msg.channel_user_id, format_error_for_user(exc))
     finally:
         # Always save session state, even on error
@@ -120,16 +121,19 @@ async def _route_by_state(
     # New user — always go to onboarding
     if not _is_onboarded(user) or session.state == SessionState.ONBOARDING:
         from app.conversation.onboarding import handle_onboarding
+
         await handle_onboarding(session, user, sender, msg)
         return
 
     match session.state:
         case SessionState.IDLE:
             from app.conversation.collecting import handle_idle
+
             await handle_idle(session, user, sender, msg)
 
         case SessionState.COLLECTING:
             from app.conversation.collecting import handle_collecting
+
             await handle_collecting(session, user, sender, msg)
 
         case SessionState.GENERATING:
@@ -137,12 +141,12 @@ async def _route_by_state(
             session.context.pending_message = msg.text
             await sender.send_text(
                 msg.channel_user_id,
-                "I'm still writing your post — hold tight! "
-                "I'll handle your message once the draft is ready.",
+                "I'm still writing your post — hold tight! " "I'll handle your message once the draft is ready.",
             )
 
         case SessionState.REVIEWING:
             from app.conversation.reviewing import handle_reviewing
+
             await handle_reviewing(session, user, sender, msg)
 
         case SessionState.REFINING:
@@ -154,11 +158,13 @@ async def _route_by_state(
 
         case SessionState.SCHEDULING:
             from app.conversation.scheduling import handle_scheduling
+
             await handle_scheduling(session, user, sender, msg)
 
         case SessionState.SCHEDULED:
             # Post is queued — treat any new message as starting a new post
             from app.conversation.collecting import handle_idle
+
             await sender.send_text(
                 msg.channel_user_id,
                 "Your post is scheduled! Starting a new one...",
@@ -180,10 +186,9 @@ async def _route_by_state(
 # ── Universal command handlers ──────────────────────────────────────────────
 
 
-async def _handle_cancel(
-    session: Session, user: UserRow, sender: object, msg: NormalisedMessage
-) -> None:
+async def _handle_cancel(session: Session, user: UserRow, sender: object, msg: NormalisedMessage) -> None:
     from app.session.fsm import transition
+
     was_state = session.state
 
     if was_state == SessionState.IDLE:
@@ -200,26 +205,25 @@ async def _handle_cancel(
     )
 
 
-async def _handle_start(
-    session: Session, user: UserRow, sender: object, msg: NormalisedMessage
-) -> None:
+async def _handle_start(session: Session, user: UserRow, sender: object, msg: NormalisedMessage) -> None:
     if not _is_onboarded(user):
         from app.conversation.onboarding import start_onboarding
+
         await start_onboarding(session, user, sender, msg)
     else:
         name = user.channel_user_id  # Will improve once we store display names
         await sender.send_text(
             msg.channel_user_id,
-            f"Welcome back! 👋\n\nSend me a topic or idea and I'll write your next LinkedIn post.\n\n"
-            f"*Commands:* /new · /schedule list · /settings · /help",
+            f"Welcome back! {name} 👋\n\nSend me a topic or idea and"
+            "I'll write your next LinkedIn post.\n\n"
+            "*Commands:* /new · /schedule list · /settings · /help",
         )
 
 
-async def _handle_new(
-    session: Session, user: UserRow, sender: object, msg: NormalisedMessage
-) -> None:
+async def _handle_new(session: Session, user: UserRow, sender: object, msg: NormalisedMessage) -> None:
     if not _is_onboarded(user):
         from app.conversation.onboarding import start_onboarding
+
         await start_onboarding(session, user, sender, msg)
         return
     session.state = SessionState.IDLE
@@ -247,30 +251,25 @@ async def _handle_help(sender: object, channel_user_id: str, state: SessionState
     await sender.send_text(channel_user_id, text)
 
 
-async def _handle_settings(
-    session: Session, user: UserRow, sender: object, msg: NormalisedMessage
-) -> None:
+async def _handle_settings(session: Session, user: UserRow, sender: object, msg: NormalisedMessage) -> None:
     from app.conversation.settings import handle_settings
+
     await handle_settings(session, user, sender, msg)
 
 
-async def _handle_schedule_command(
-    session: Session, user: UserRow, sender: object, msg: NormalisedMessage
-) -> None:
+async def _handle_schedule_command(session: Session, user: UserRow, sender: object, msg: NormalisedMessage) -> None:
     from app.conversation.scheduling import handle_schedule_command
+
     await handle_schedule_command(session, user, sender, msg)
 
 
-async def _handle_reconnect(
-    session: Session, user: UserRow, sender: object, msg: NormalisedMessage
-) -> None:
+async def _handle_reconnect(session: Session, user: UserRow, sender: object, msg: NormalisedMessage) -> None:
     from app.conversation.onboarding import restart_linkedin_oauth
+
     await restart_linkedin_oauth(session, user, sender, msg)
 
 
-async def _handle_timezone(
-    session: Session, user: UserRow, sender: object, msg: NormalisedMessage
-) -> None:
+async def _handle_timezone(session: Session, user: UserRow, sender: object, msg: NormalisedMessage) -> None:
     tz_arg = msg.command_args
     if not tz_arg:
         await sender.send_text(
@@ -281,6 +280,7 @@ async def _handle_timezone(
         return
 
     import pytz
+
     try:
         pytz.timezone(tz_arg)  # Validate
         db = await get_db()
@@ -289,13 +289,11 @@ async def _handle_timezone(
     except pytz.exceptions.UnknownTimeZoneError:
         await sender.send_text(
             msg.channel_user_id,
-            f"Unknown timezone: `{tz_arg}`\n\nTry a value like `Asia/Kolkata`, `America/New_York`, or `UTC`.",
+            f"Unknown timezone: `{tz_arg}`\n\nTry a value like" "`Asia/Kolkata`, `America/New_York`, or `UTC`.",
         )
 
 
-async def _handle_delete(
-    session: Session, user: UserRow, sender: object, msg: NormalisedMessage
-) -> None:
+async def _handle_delete(session: Session, user: UserRow, sender: object, msg: NormalisedMessage) -> None:
     """
     /delete — permanently deactivate a user account.
 
@@ -334,27 +332,20 @@ async def _handle_delete(
 
     # 2. Cancel scheduled posts in Zernio if possible
     scheduled_posts = await _maybe_await(
-        db.table("posts")
-        .select("id, zernio_post_id")
-        .eq("user_id", user_id)
-        .eq("status", "scheduled")
-        .execute()
+        db.table("posts").select("id, zernio_post_id").eq("user_id", user_id).eq("status", "scheduled").execute()
     )
     if scheduled_posts.data:
         for post in scheduled_posts.data:
             if post.get("zernio_post_id") and user.zernio_api_key_enc:
                 try:
                     from app.zernio.client import make_zernio_client
+
                     client = make_zernio_client(user)
                     await client.cancel_post(post["zernio_post_id"])
                 except Exception:
                     pass  # Best-effort cancellation
         await _maybe_await(
-            db.table("posts")
-            .update({"status": "cancelled"})
-            .eq("user_id", user_id)
-            .eq("status", "scheduled")
-            .execute()
+            db.table("posts").update({"status": "cancelled"}).eq("user_id", user_id).eq("status", "scheduled").execute()
         )
 
     # 3. Clear encrypted credentials (GDPR: wipe sensitive data)
@@ -389,9 +380,7 @@ async def _handle_delete(
     )
 
 
-async def _handle_drafts(
-    session: Session, user: UserRow, sender: object, msg: NormalisedMessage
-) -> None:
+async def _handle_drafts(session: Session, user: UserRow, sender: object, msg: NormalisedMessage) -> None:
     """
     /drafts — list the user's recent posts with their statuses.
     Shows last 5 posts across all statuses: draft, scheduled, published, failed.
@@ -414,11 +403,11 @@ async def _handle_drafts(
         return
 
     status_emoji = {
-        "draft":     "📝",
-        "approved":  "✅",
+        "draft": "📝",
+        "approved": "✅",
         "scheduled": "📅",
         "published": "🟢",
-        "failed":    "❌",
+        "failed": "❌",
         "cancelled": "🚫",
     }
 
@@ -434,10 +423,7 @@ async def _handle_drafts(
         elif post["status"] == "published" and post.get("published_at"):
             date_info = f" — published {post['published_at'][:10]}"
 
-        lines.append(
-            f"{emoji} `{post_id_short}` *{post['status']}*{date_info}\n"
-            f"   _{preview}..._\n"
-        )
+        lines.append(f"{emoji} `{post_id_short}` *{post['status']}*{date_info}\n" f"   _{preview}..._\n")
 
     lines.append("\n_Use /schedule cancel {id} to cancel a scheduled post_")
     await sender.send_text(msg.channel_user_id, "\n".join(lines))
@@ -448,21 +434,18 @@ async def _handle_drafts(
 
 def _is_onboarded(user: UserRow) -> bool:
     """User is fully onboarded if they have a Zernio account and an LLM configured."""
-    return bool(
-        user.zernio_api_key_enc
-        and user.zernio_account_id
-        and user.llm_api_key_enc
-        and user.llm_provider
-    )
+    return bool(user.zernio_api_key_enc and user.zernio_account_id and user.llm_api_key_enc and user.llm_provider)
 
 
 def _get_sender(channel: str) -> object:
     """Return the appropriate channel sender."""
     if channel == "telegram":
         from app.channels.telegram import TelegramSender
+
         return TelegramSender()
     elif channel == "whatsapp":
         from app.channels.whatsapp import WhatsAppSender
+
         return WhatsAppSender()
     else:
         raise ValueError(f"Unknown channel: {channel}")
@@ -470,14 +453,7 @@ def _get_sender(channel: str) -> object:
 
 async def _load_user(user_id: UUID) -> UserRow | None:
     db = await get_db()
-    result = await (
-        db.table("users")
-        .select("*")
-        .eq("id", str(user_id))
-        .eq("is_active", True)
-        .maybe_single()
-        .execute()
-    )
+    result = await db.table("users").select("*").eq("id", str(user_id)).eq("is_active", True).maybe_single().execute()
     if not result or not result.data:
         return None
     return UserRow(**result.data)

@@ -1,4 +1,4 @@
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock, patch
 from uuid import uuid4
@@ -24,7 +24,7 @@ def make_user() -> UserRow:
         timezone="Asia/Kolkata",
         style_prefs={},
         is_active=True,
-        created_at=datetime.now(timezone.utc),
+        created_at=datetime.now(tz=UTC),
     )
 
 

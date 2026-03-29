@@ -8,8 +8,6 @@ All providers return a plain string (the generated text).
 Provider-specific errors are caught and re-raised as LLMError.
 """
 
-import asyncio
-
 from app.core.logging import get_logger
 from app.db.models import LLMProvider, UserRow
 
@@ -155,29 +153,25 @@ async def _call_groq(api_key: str, model: str, system: str, user: str, max_token
 
 
 async def _call_gemini(api_key: str, model: str, system: str, user: str, max_tokens: int) -> str:
-    import google.generativeai as genai
+    from google import errors, genai
 
     try:
-        genai.configure(api_key=api_key)
-        client = genai.GenerativeModel(model)
-        response = await asyncio.to_thread(
-            client.generate_content,
+        client = genai.Client(api_key=api_key)
+        response = await client.aio.models.generate_content(
+            model=model,
             contents=[genai.Content(role="user", parts=[genai.Part(text=system + "\n\n" + user)])],
-            generation_config=genai.types.GenerationConfig(max_output_tokens=max_tokens),
+            config=genai.types.GenerationConfig(max_output_tokens=max_tokens),
         )
         return (response.text or "").strip()
 
-    except google.generativeai.error.InvalidArgument as exc:
+    except errors.APIError as exc:
         if "API key" in str(exc) or "authorization" in str(exc).lower():
             raise LLMError(
                 "Your Gemini API key is invalid. Update it via /settings.",
                 retryable=False,
             )
         raise LLMError(f"Gemini API error: {str(exc)[:200]}", retryable=True)
-    except google.generativeai.error.APIError as exc:
-        if "rate limit" in str(exc).lower():
-            raise LLMError("Gemini rate limit hit. Retrying shortly...", retryable=True)
-        raise LLMError(f"Gemini API error: {str(exc)[:200]}", retryable=True)
+
     except Exception as exc:
         raise LLMError(f"Gemini error: {str(exc)[:200]}", retryable=True)
 

@@ -62,7 +62,8 @@ async def oauth_callback(
             emoji="✅",
             message="Your LinkedIn account has been successfully authorised.",
             detail="",
-            instruction="Go back to Telegram or WhatsApp. If your bot session is still open, it should continue automatically.",
+            instruction="Go back to Telegram or WhatsApp. If your bot session is still open,"
+            "it should continue automatically.",
         )
         return HTMLResponse(content=html, status_code=200)
 
@@ -130,12 +131,7 @@ async def _auto_continue_onboarding(
 
     db = await get_db()
     user_result = await (
-        db.table("users")
-        .select("*")
-        .eq("zernio_profile_id", profile_id)
-        .eq("is_active", True)
-        .maybe_single()
-        .execute()
+        db.table("users").select("*").eq("zernio_profile_id", profile_id).eq("is_active", True).maybe_single().execute()
     )
     if not user_result or not user_result.data:
         logger.warning("oauth.callback.user_not_found", profile_id=profile_id)

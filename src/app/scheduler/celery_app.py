@@ -35,7 +35,6 @@ celery_app.conf.update(
     result_serializer="json",
     timezone="UTC",
     enable_utc=True,
-
     # Task routing
     task_routes={
         "app.scheduler.tasks.generate_post_task": {"queue": "generation"},
@@ -46,19 +45,15 @@ celery_app.conf.update(
         "app.scheduler.tasks.cleanup_webhook_log": {"queue": "default"},
         "app.scheduler.tasks.watchdog_stale_jobs": {"queue": "default"},
     },
-
     # Reliability
-    task_acks_late=True,           # Don't ack until task completes (survive worker crash)
+    task_acks_late=True,  # Don't ack until task completes (survive worker crash)
     task_reject_on_worker_lost=True,
     worker_prefetch_multiplier=1,  # One task at a time per worker slot
-
     # Retries
     task_max_retries=3,
-    task_default_retry_delay=60,   # 1 minute default retry delay
-
+    task_default_retry_delay=60,  # 1 minute default retry delay
     # Results
     result_expires=86400,  # 24 hours
-
     # Beat schedule
     beat_schedule={
         "watchdog-stale-jobs": {

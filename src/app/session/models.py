@@ -7,10 +7,8 @@ SessionState: every valid FSM state
 SessionContext: typed wrapper around the session.context JSONB field
 """
 
-from datetime import datetime
 from enum import StrEnum
 from typing import Any
-from uuid import UUID
 
 from pydantic import BaseModel, Field
 
@@ -28,6 +26,7 @@ class SessionState(StrEnum):
 
 class OnboardingStep(StrEnum):
     """Sub-steps within the ONBOARDING state."""
+
     ZERNIO_KEY = "zernio_key"
     LLM_CHOICE = "llm_choice"
     LLM_KEY = "llm_key"

@@ -27,6 +27,7 @@ import argparse
 import asyncio
 import os
 import sys
+from datetime import UTC
 from pathlib import Path
 
 # Add src layout to import path
@@ -94,9 +95,7 @@ def cmd_users_list(args) -> None:
 
 def cmd_users_show(args) -> None:
     db = run_async(get_db())
-    result = run_async(
-        db.table("users").select("*").like("id", f"{args.id}%").maybe_single().execute()
-    )
+    result = run_async(db.table("users").select("*").like("id", f"{args.id}%").maybe_single().execute())
     if not result.data:
         print(f"User not found: {args.id}")
         return
@@ -113,20 +112,16 @@ def cmd_users_show(args) -> None:
 
     prefs = u.get("style_prefs", {})
     if prefs:
-        print(f"\n  Style prefs:")
+        print("\n  Style prefs:")
         for k, v in prefs.items():
-            if not isinstance(v, (list, dict)):
+            if not isinstance(v, list | dict):
                 print(f"    {k}: {v}")
 
 
 def cmd_users_delete(args) -> None:
     db = run_async(get_db())
     result = run_async(
-        db.table("users")
-        .select("id, channel_user_id")
-        .like("id", f"{args.id}%")
-        .maybe_single()
-        .execute()
+        db.table("users").select("id, channel_user_id").like("id", f"{args.id}%").maybe_single().execute()
     )
     if not result.data:
         print(f"User not found: {args.id}")
@@ -198,26 +193,19 @@ def cmd_posts_cancel(args) -> None:
         return
 
     run_async(db.table("posts").update({"status": "cancelled"}).eq("id", post["id"]).execute())
-    run_async(
-        db.table("schedule_jobs")
-        .update({"status": "cancelled"})
-        .eq("post_id", post["id"])
-        .execute()
-    )
+    run_async(db.table("schedule_jobs").update({"status": "cancelled"}).eq("post_id", post["id"]).execute())
     print(f"✓ Post {post['id']} cancelled.")
 
 
 def cmd_jobs_list(args) -> None:
     db = run_async(get_db())
     result = run_async(
-        (
-            db.table("schedule_jobs")
-            .select("id, user_id, post_id, job_type, run_at, status, attempts, last_error")
-            .in_("status", ["pending", "failed"])
-            .order("run_at", desc=False)
-            .limit(20)
-            .execute()
-        )
+        db.table("schedule_jobs")
+        .select("id, user_id, post_id, job_type, run_at, status, attempts, last_error")
+        .in_("status", ["pending", "failed"])
+        .order("run_at", desc=False)
+        .limit(20)
+        .execute()
     )
 
     if not result.data:
@@ -230,20 +218,21 @@ def cmd_jobs_list(args) -> None:
         jid = j["id"][:8]
         uid = j["user_id"][:8]
         run_at = j.get("run_at", "—")[:16]
-        print(
-            f"{jid:<12} {uid:<12} {j['job_type']:<12} {run_at:<22} {j['status']:<10} {j['attempts']}"
-        )
+        print(f"{jid:<12} {uid:<12} {j['job_type']:<12} {run_at:<22} {j['status']:<10} {j['attempts']}")
         if j.get("last_error"):
             print(f"  └─ Error: {j['last_error'][:80]}")
 
 
 def cmd_db_cleanup(args) -> None:
-    from datetime import datetime, timedelta, timezone
+    from datetime import datetime, timedelta
 
     db = run_async(get_db())
-    cutoff = (datetime.now(timezone.utc) - timedelta(days=30)).isoformat()
+    cutoff = (datetime.now(UTC) - timedelta(days=30)).isoformat()
     result = run_async(db.table("webhook_log").delete().lt("processed_at", cutoff).execute())
-    print(f"✓ Deleted webhook_log rows older than 30 days. Cutoff: {cutoff[:10]}")
+    print(
+        f"✓ Deleted webhook_log rows older than 30 days. Cutoff: {cutoff[:10]}"
+        f"Deleted count: {result.count if hasattr(result, 'count') else 'unknown'}."
+    )
 
 
 def cmd_db_stats(args) -> None:

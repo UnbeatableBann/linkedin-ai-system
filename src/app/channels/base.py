@@ -15,8 +15,8 @@ from typing import Any
 
 class MessageType(StrEnum):
     TEXT = "text"
-    COMMAND = "command"   # /start, /cancel, etc.
-    CALLBACK = "callback" # inline button presses (Telegram)
+    COMMAND = "command"  # /start, /cancel, etc.
+    CALLBACK = "callback"  # inline button presses (Telegram)
 
 
 @dataclass

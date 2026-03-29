@@ -96,9 +96,7 @@ def parse_whatsapp_payload(payload: dict[str, Any]) -> NormalisedMessage | None:
         message = messages[0]
 
         if message.get("type") != "text":
-            logger.debug(
-                "whatsapp.parse.skip", reason="non-text message type", type=message.get("type")
-            )
+            logger.debug("whatsapp.parse.skip", reason="non-text message type", type=message.get("type"))
             return None
 
         phone_number = message["from"]
@@ -203,9 +201,7 @@ class WhatsAppSender(BaseChannelSender):
             await self.send_text(channel_user_id, f"{clean_text}\n\n{numbered}")
             return
 
-        wa_buttons = [
-            {"type": "reply", "reply": {"id": data, "title": label[:20]}} for label, data in buttons
-        ]
+        wa_buttons = [{"type": "reply", "reply": {"id": data, "title": label[:20]}} for label, data in buttons]
         payload = {
             "messaging_product": "whatsapp",
             "recipient_type": "individual",
@@ -286,8 +282,6 @@ async def _post_with_retry(
             return
         except httpx.HTTPStatusError as exc:
             if attempt == max_retries - 1:
-                logger.error(
-                    "whatsapp.send.failed", error=str(exc), status=exc.response.status_code
-                )
+                logger.error("whatsapp.send.failed", error=str(exc), status=exc.response.status_code)
                 raise
             await asyncio.sleep(2**attempt)

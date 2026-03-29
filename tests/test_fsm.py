@@ -13,9 +13,14 @@ Covers:
 
 import pytest
 
-from app.session.fsm import Event, InvalidTransitionError, allowed_events, can_transition, transition
+from app.session.fsm import (
+    Event,
+    InvalidTransitionError,
+    allowed_events,
+    can_transition,
+    transition,
+)
 from app.session.models import SessionState
-
 
 # ── Valid transitions ──────────────────────────────────────────────────────
 

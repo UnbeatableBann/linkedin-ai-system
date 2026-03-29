@@ -15,7 +15,8 @@
 #   make clean          Remove containers and volumes
 
 .PHONY: setup up down test test-watch lint format logs logs-worker \
-        shell migrate webhook manage clean rebuild check-env stats
+	shell migrate webhook manage clean rebuild check-env stats \
+	precommit-install precommit-run precommit-all
 
 # ── Setup ──────────────────────────────────────────────────────────────────
 
@@ -33,7 +34,7 @@ login:
 	@echo "Logging in to Docker Hub..."
 	docker login
 
-up: 
+up:
 	docker compose up --build
 	@echo ""
 	@echo "✓ Services started:"
@@ -115,6 +116,17 @@ typecheck:
 
 check: lint format-check typecheck test
 	@echo "✓ All checks passed"
+
+precommit-install:
+	uv run pre-commit install
+	uv run pre-commit install --hook-type pre-push
+	@echo "✓ pre-commit hooks installed"
+
+precommit-run:
+	uv run pre-commit run
+
+precommit-all:
+	uv run pre-commit run --all-files
 
 # ── Deployment helpers ─────────────────────────────────────────────────────
 
