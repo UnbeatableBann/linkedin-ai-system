@@ -5,11 +5,10 @@ Tests for style signal extraction and preference merging.
 Pure unit tests — no DB, no network.
 """
 
-import pytest
 from app.content.style_memory import (
+    build_style_context,
     extract_style_signals,
     merge_style_prefs,
-    build_style_context,
 )
 
 
@@ -75,7 +74,8 @@ class TestExtractStyleSignals:
         assert signals["hook_length"] <= 12
 
     def test_long_hook(self):
-        content = "I have been thinking a lot about the way startup founders approach growth in the Indian market.\n\nHere is what I found."
+        content = "I have been thinking a lot about the way startup founders approach growth in the Indian market."
+        "\n\nHere is what I found."
         signals = extract_style_signals(content)
         assert signals["short_hook"] is False
 
@@ -105,7 +105,7 @@ class TestMergeStylePrefs:
         prefs = merge_style_prefs(prefs, {"ends_with_question": True})
         prefs = merge_style_prefs(prefs, {"ends_with_question": False})
         # 2/3 posts end with question
-        assert abs(prefs["rate_ends_with_question"] - 2/3) < 0.01
+        assert abs(prefs["rate_ends_with_question"] - 2 / 3) < 0.01
 
     def test_example_posts_stored(self):
         prefs = {}

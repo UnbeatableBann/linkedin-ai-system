@@ -10,20 +10,27 @@ FROM python:3.12-slim AS base
 
 WORKDIR /app
 
+ENV PYTHONDONTWRITEBYTECODE=1
+ENV PYTHONUNBUFFERED=1
+ENV PYTHONPATH=/app/src
+
 # System dependencies
 RUN apt-get update && apt-get install -y --no-install-recommends \
     curl \
-    && rm -rf /var/lib/apt/lists/*
+    && rm -rf /var/lib/apt/lists/* \
+    && pip install --no-cache-dir uv
 
-# Upgrade pip
-RUN pip install --no-cache-dir --upgrade pip
+# Use an in-project virtual environment for predictable runtime commands.
+ENV UV_PROJECT_ENVIRONMENT=.venv
+
+# Copy dependency files FIRST (for caching)
+COPY pyproject.toml uv.lock ./
 
 # ── Dev stage ─────────────────────────────────────────────────────────────────
 FROM base AS dev
 
-# Install all dependencies including dev tools
-COPY pyproject.toml .
-RUN pip install --no-cache-dir -e ".[dev]"
+# Install all dependencies including dev/docs
+RUN uv sync --frozen --all-extras --no-install-project --link-mode=copy
 
 # Source is mounted as a volume in docker-compose (hot reload)
 EXPOSE 8000
@@ -31,12 +38,11 @@ EXPOSE 8000
 # ── Production stage ──────────────────────────────────────────────────────────
 FROM base AS prod
 
-# Copy and install only production deps
-COPY pyproject.toml .
-RUN pip install --no-cache-dir .
+# Copy and install only production deps (no dev or docs extras)
+RUN uv sync --frozen --no-dev --no-install-project --link-mode=copy
 
 # Copy source
-COPY app/ ./app/
+COPY src/ ./src/
 COPY scripts/health_check.sh ./scripts/health_check.sh
 RUN chmod +x scripts/health_check.sh
 
@@ -46,7 +52,7 @@ USER appuser
 
 EXPOSE 8000
 
-HEALTHCHECK --interval=30s --timeout=10s --start-period=15s --retries=3 \
+HEALTHCHECK --interval=240s --timeout=10s --start-period=15s --retries=3 \
     CMD ./scripts/health_check.sh || exit 1
 
-CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000", "--workers", "2"]
+CMD ["uv", "run", "uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000", "--workers", "2"]

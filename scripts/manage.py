@@ -24,13 +24,15 @@ Usage:
 """
 
 import argparse
+import asyncio
 import os
 import sys
+from datetime import UTC
 from pathlib import Path
 
-# Add project root to path
+# Add src layout to import path
 ROOT = Path(__file__).parent.parent
-sys.path.insert(0, str(ROOT))
+sys.path.insert(0, str(ROOT / "src"))
 
 
 def load_env() -> None:
@@ -46,19 +48,33 @@ def load_env() -> None:
             os.environ.setdefault(key.strip(), value.strip())
 
 
-def get_db():
+def run_async(coro):
+    """Run an async coroutine from this synchronous CLI."""
+    loop = asyncio.new_event_loop()
+    try:
+        return loop.run_until_complete(coro)
+    finally:
+        loop.close()
+
+
+async def get_db():
     from app.db.client import get_db as _get_db
-    return _get_db()
+
+    return await _get_db()
 
 
 # ── Commands ───────────────────────────────────────────────────────────────
 
 
 def cmd_users_list(args) -> None:
-    db = get_db()
-    result = db.table("users").select(
-        "id, channel, channel_user_id, llm_provider, timezone, is_active, created_at"
-    ).order("created_at", desc=True).limit(50).execute()
+    db = run_async(get_db())
+    result = run_async(
+        db.table("users")
+        .select("id, channel, channel_user_id, llm_provider, timezone, is_active, created_at")
+        .order("created_at", desc=True)
+        .limit(50)
+        .execute()
+    )
 
     if not result.data:
         print("No users found.")
@@ -69,15 +85,17 @@ def cmd_users_list(args) -> None:
     for u in result.data:
         uid = u["id"][:8]
         active = "✓" if u["is_active"] else "✗"
-        print(f"{uid:<12} {u['channel']:<12} {u['channel_user_id']:<20} "
-              f"{u.get('llm_provider','—'):<12} {u['timezone']:<20} {active}")
+        print(
+            f"{uid:<12} {u['channel']:<12} {u['channel_user_id']:<20} "
+            f"{u.get('llm_provider','—'):<12} {u['timezone']:<20} {active}"
+        )
 
     print(f"\nTotal: {len(result.data)} users")
 
 
 def cmd_users_show(args) -> None:
-    db = get_db()
-    result = db.table("users").select("*").like("id", f"{args.id}%").maybe_single().execute()
+    db = run_async(get_db())
+    result = run_async(db.table("users").select("*").like("id", f"{args.id}%").maybe_single().execute())
     if not result.data:
         print(f"User not found: {args.id}")
         return
@@ -94,15 +112,17 @@ def cmd_users_show(args) -> None:
 
     prefs = u.get("style_prefs", {})
     if prefs:
-        print(f"\n  Style prefs:")
+        print("\n  Style prefs:")
         for k, v in prefs.items():
-            if not isinstance(v, (list, dict)):
+            if not isinstance(v, list | dict):
                 print(f"    {k}: {v}")
 
 
 def cmd_users_delete(args) -> None:
-    db = get_db()
-    result = db.table("users").select("id, channel_user_id").like("id", f"{args.id}%").maybe_single().execute()
+    db = run_async(get_db())
+    result = run_async(
+        db.table("users").select("id, channel_user_id").like("id", f"{args.id}%").maybe_single().execute()
+    )
     if not result.data:
         print(f"User not found: {args.id}")
         return
@@ -114,14 +134,20 @@ def cmd_users_delete(args) -> None:
         return
 
     # Soft delete
-    db.table("users").update({"is_active": False}).eq("id", user["id"]).execute()
+    run_async(db.table("users").update({"is_active": False}).eq("id", user["id"]).execute())
     # Cancel pending jobs
-    db.table("schedule_jobs").update({"status": "cancelled"}).eq("user_id", user["id"]).eq("status", "pending").execute()
+    run_async(
+        db.table("schedule_jobs")
+        .update({"status": "cancelled"})
+        .eq("user_id", user["id"])
+        .eq("status", "pending")
+        .execute()
+    )
     print(f"✓ User {user['id']} deactivated and pending jobs cancelled.")
 
 
 def cmd_posts_list(args) -> None:
-    db = get_db()
+    db = run_async(get_db())
     query = db.table("posts").select("id, user_id, status, scheduled_for, created_at, content")
 
     status_filter = getattr(args, "status", None)
@@ -132,7 +158,7 @@ def cmd_posts_list(args) -> None:
     if user_filter:
         query = query.like("user_id", f"{user_filter}%")
 
-    result = query.order("created_at", desc=True).limit(20).execute()
+    result = run_async(query.order("created_at", desc=True).limit(20).execute())
 
     if not result.data:
         print("No posts found.")
@@ -149,8 +175,14 @@ def cmd_posts_list(args) -> None:
 
 
 def cmd_posts_cancel(args) -> None:
-    db = get_db()
-    result = db.table("posts").select("id, status, user_id, zernio_post_id").like("id", f"{args.id}%").maybe_single().execute()
+    db = run_async(get_db())
+    result = run_async(
+        db.table("posts")
+        .select("id, status, user_id, zernio_post_id")
+        .like("id", f"{args.id}%")
+        .maybe_single()
+        .execute()
+    )
     if not result.data:
         print(f"Post not found: {args.id}")
         return
@@ -160,14 +192,14 @@ def cmd_posts_cancel(args) -> None:
         print("Post is already published — cannot cancel.")
         return
 
-    db.table("posts").update({"status": "cancelled"}).eq("id", post["id"]).execute()
-    db.table("schedule_jobs").update({"status": "cancelled"}).eq("post_id", post["id"]).execute()
+    run_async(db.table("posts").update({"status": "cancelled"}).eq("id", post["id"]).execute())
+    run_async(db.table("schedule_jobs").update({"status": "cancelled"}).eq("post_id", post["id"]).execute())
     print(f"✓ Post {post['id']} cancelled.")
 
 
 def cmd_jobs_list(args) -> None:
-    db = get_db()
-    result = (
+    db = run_async(get_db())
+    result = run_async(
         db.table("schedule_jobs")
         .select("id, user_id, post_id, job_type, run_at, status, attempts, last_error")
         .in_("status", ["pending", "failed"])
@@ -192,21 +224,25 @@ def cmd_jobs_list(args) -> None:
 
 
 def cmd_db_cleanup(args) -> None:
-    from datetime import datetime, timedelta, timezone
-    db = get_db()
-    cutoff = (datetime.now(timezone.utc) - timedelta(days=30)).isoformat()
-    result = db.table("webhook_log").delete().lt("processed_at", cutoff).execute()
-    print(f"✓ Deleted webhook_log rows older than 30 days. Cutoff: {cutoff[:10]}")
+    from datetime import datetime, timedelta
+
+    db = run_async(get_db())
+    cutoff = (datetime.now(UTC) - timedelta(days=30)).isoformat()
+    result = run_async(db.table("webhook_log").delete().lt("processed_at", cutoff).execute())
+    print(
+        f"✓ Deleted webhook_log rows older than 30 days. Cutoff: {cutoff[:10]}"
+        f"Deleted count: {result.count if hasattr(result, 'count') else 'unknown'}."
+    )
 
 
 def cmd_db_stats(args) -> None:
-    db = get_db()
+    db = run_async(get_db())
     tables = ["users", "sessions", "posts", "schedule_jobs", "webhook_log", "user_schedules"]
     print("\nTable row counts:")
     print("─" * 30)
     for table in tables:
         try:
-            result = db.table(table).select("id", count="exact").execute()
+            result = run_async(db.table(table).select("id", count="exact").execute())
             count = result.count if hasattr(result, "count") else len(result.data)
             print(f"  {table:<20} {count:>8}")
         except Exception as e:
@@ -215,7 +251,9 @@ def cmd_db_stats(args) -> None:
 
 def cmd_bot_webhook_info(args) -> None:
     import httpx
+
     from app.config import get_settings
+
     settings = get_settings()
 
     resp = httpx.get(
@@ -289,16 +327,16 @@ def main() -> None:
     args = parser.parse_args()
 
     dispatch = {
-        ("users", "list"):          cmd_users_list,
-        ("users", "show"):          cmd_users_show,
-        ("users", "delete"):        cmd_users_delete,
-        ("posts", "list"):          cmd_posts_list,
-        ("posts", "cancel"):        cmd_posts_cancel,
-        ("jobs", "list"):           cmd_jobs_list,
-        ("db", "cleanup"):          cmd_db_cleanup,
-        ("db", "stats"):            cmd_db_stats,
-        ("bot", "webhook-info"):    cmd_bot_webhook_info,
-        ("bot", "set-webhook"):     cmd_bot_set_webhook,
+        ("users", "list"): cmd_users_list,
+        ("users", "show"): cmd_users_show,
+        ("users", "delete"): cmd_users_delete,
+        ("posts", "list"): cmd_posts_list,
+        ("posts", "cancel"): cmd_posts_cancel,
+        ("jobs", "list"): cmd_jobs_list,
+        ("db", "cleanup"): cmd_db_cleanup,
+        ("db", "stats"): cmd_db_stats,
+        ("bot", "webhook-info"): cmd_bot_webhook_info,
+        ("bot", "set-webhook"): cmd_bot_set_webhook,
     }
 
     handler = dispatch.get((args.group, args.action))

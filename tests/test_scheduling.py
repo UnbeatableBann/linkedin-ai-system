@@ -7,11 +7,11 @@ slot suggestions, timezone handling.
 No network calls or DB calls — pure unit tests on the helper functions.
 """
 
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 from unittest.mock import MagicMock, patch
 
-import pytz
 import pytest
+import pytz
 
 from app.conversation.scheduling import (
     _format_dt,
@@ -20,9 +20,8 @@ from app.conversation.scheduling import (
     _suggest_next_slot,
 )
 
-
 IST = pytz.timezone("Asia/Kolkata")
-UTC = timezone.utc
+UTC = UTC
 
 
 class TestParseDatetime:
@@ -142,10 +141,13 @@ class TestConflictCheck:
     @pytest.mark.asyncio
     async def test_no_conflict_returns_false(self):
         mock_db = MagicMock()
-        mock_db.table.return_value.select.return_value.eq.return_value.eq.return_value.gte.return_value.lte.return_value.execute.return_value = MagicMock(data=[])
+        mock_db.table.return_value.select.return_value.eq.return_value.eq.return_value.gte.return_value.lte.return_value.execute.return_value = MagicMock(  # noqa: E501
+            data=[]
+        )
 
         with patch("app.conversation.scheduling.get_db", return_value=mock_db):
             from app.conversation.scheduling import _check_conflict
+
             result = await _check_conflict("user_123", datetime.now(UTC) + timedelta(days=1))
 
         assert result is False
@@ -154,12 +156,13 @@ class TestConflictCheck:
     async def test_conflict_detected(self):
         mock_db = MagicMock()
         # Simulate an existing post in the window
-        mock_db.table.return_value.select.return_value.eq.return_value.eq.return_value.gte.return_value.lte.return_value.execute.return_value = MagicMock(
+        mock_db.table.return_value.select.return_value.eq.return_value.eq.return_value.gte.return_value.lte.return_value.execute.return_value = MagicMock(  # noqa: E501
             data=[{"id": "existing_post"}]
         )
 
         with patch("app.conversation.scheduling.get_db", return_value=mock_db):
             from app.conversation.scheduling import _check_conflict
+
             result = await _check_conflict("user_123", datetime.now(UTC) + timedelta(days=1))
 
         assert result is True

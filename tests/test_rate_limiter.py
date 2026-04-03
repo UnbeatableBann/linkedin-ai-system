@@ -5,43 +5,44 @@ Tests for rate limiting logic.
 Redis calls are mocked — testing the logic, not Redis.
 """
 
+from unittest.mock import patch
+
 import pytest
-from unittest.mock import AsyncMock, MagicMock, patch
 
 from app.core.rate_limiter import (
-    LimitType,
-    MESSAGE_LIMIT_PER_MINUTE,
     GENERATION_LIMIT_PER_HOUR,
+    MESSAGE_LIMIT_PER_MINUTE,
     SCHEDULE_LIMIT_PER_DAY,
-    RateLimitExceeded,
+    LimitType,
+    RateLimitExceededError,
 )
 
 
-class TestRateLimitExceeded:
+class TestRateLimitExceededError:
     def test_message_user_message(self):
-        exc = RateLimitExceeded(LimitType.MESSAGE, retry_after_seconds=30)
+        exc = RateLimitExceededError(LimitType.MESSAGE, retry_after_seconds=30)
         msg = exc.user_message()
         assert "30" in msg
         assert "fast" in msg.lower() or "wait" in msg.lower()
 
     def test_generation_user_message(self):
-        exc = RateLimitExceeded(LimitType.GENERATION, retry_after_seconds=1800)
+        exc = RateLimitExceededError(LimitType.GENERATION, retry_after_seconds=1800)
         msg = exc.user_message()
         assert "30" in msg  # 1800 seconds = 30 minutes
         assert "hour" in msg.lower() or "generation" in msg.lower()
 
     def test_schedule_user_message(self):
-        exc = RateLimitExceeded(LimitType.SCHEDULE, retry_after_seconds=43200)
+        exc = RateLimitExceededError(LimitType.SCHEDULE, retry_after_seconds=43200)
         msg = exc.user_message()
         assert "5" in msg  # 5 posts/day limit
         assert "daily" in msg.lower() or "today" in msg.lower()
 
     def test_retry_after_stored(self):
-        exc = RateLimitExceeded(LimitType.MESSAGE, retry_after_seconds=45)
+        exc = RateLimitExceededError(LimitType.MESSAGE, retry_after_seconds=45)
         assert exc.retry_after_seconds == 45
 
     def test_limit_type_stored(self):
-        exc = RateLimitExceeded(LimitType.GENERATION, retry_after_seconds=100)
+        exc = RateLimitExceededError(LimitType.GENERATION, retry_after_seconds=100)
         assert exc.limit_type == LimitType.GENERATION
 
 
@@ -52,15 +53,17 @@ class TestCheckRateLimit:
         with patch("app.core.rate_limiter._check", side_effect=ConnectionError("Redis down")):
             # Should not raise
             from app.core.rate_limiter import check_rate_limit
+
             await check_rate_limit("user_123", LimitType.MESSAGE)
 
     @pytest.mark.asyncio
     async def test_raises_when_limit_exceeded(self):
-        """Should propagate RateLimitExceeded through check_rate_limit."""
-        exc = RateLimitExceeded(LimitType.MESSAGE, 30)
+        """Should propagate RateLimitExceededError through check_rate_limit."""
+        exc = RateLimitExceededError(LimitType.MESSAGE, 30)
         with patch("app.core.rate_limiter._check", side_effect=exc):
             from app.core.rate_limiter import check_rate_limit
-            with pytest.raises(RateLimitExceeded):
+
+            with pytest.raises(RateLimitExceededError):
                 await check_rate_limit("user_123", LimitType.MESSAGE)
 
 

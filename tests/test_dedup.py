@@ -6,8 +6,9 @@ Tests for webhook deduplication logic.
 Uses pytest-mock to avoid hitting Supabase in tests.
 """
 
+from unittest.mock import MagicMock, patch
+
 import pytest
-from unittest.mock import AsyncMock, MagicMock, patch
 
 from app.channels.base import MessageType, NormalisedMessage
 from app.gateway.dedup import is_duplicate
@@ -59,9 +60,7 @@ class TestIsDuplicate:
         msg = make_msg("dup_456")
 
         mock_db = MagicMock()
-        mock_db.table.return_value.insert.return_value.execute.side_effect = Exception(
-            "UNIQUE constraint failed"
-        )
+        mock_db.table.return_value.insert.return_value.execute.side_effect = Exception("UNIQUE constraint failed")
 
         with patch("app.gateway.dedup.get_db", return_value=mock_db):
             result = await is_duplicate(msg)
@@ -77,9 +76,7 @@ class TestIsDuplicate:
         msg = make_msg("msg_unexpected")
 
         mock_db = MagicMock()
-        mock_db.table.return_value.insert.return_value.execute.side_effect = Exception(
-            "connection timeout"
-        )
+        mock_db.table.return_value.insert.return_value.execute.side_effect = Exception("connection timeout")
 
         with patch("app.gateway.dedup.get_db", return_value=mock_db):
             result = await is_duplicate(msg)

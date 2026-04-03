@@ -54,28 +54,15 @@ async def get_or_create_user(channel: str, channel_user_id: str) -> UUID:
     """
     Atomically get or create a user row.
 
-    Uses Supabase upsert with ON CONFLICT DO NOTHING so concurrent
-    webhook deliveries for a brand-new user are safe.
+    Uses a single Supabase upsert on the unique
+    (channel, channel_user_id) key so concurrent deliveries are safe.
 
     Returns the user's UUID.
     """
-    db = get_db()
+    db = await get_db()
 
-    # Try to fetch existing user first (fast path)
-    result = (
-        db.table("users")
-        .select("id")
-        .eq("channel", channel)
-        .eq("channel_user_id", channel_user_id)
-        .maybe_single()
-        .execute()
-    )
-
-    if result.data:
-        return UUID(result.data["id"])
-
-    # User doesn't exist — create them
-    insert_result = (
+    # Single atomic upsert by unique key. On conflict, Supabase updates and returns the row.
+    result = await (
         db.table("users")
         .upsert(
             {
@@ -87,14 +74,15 @@ async def get_or_create_user(channel: str, channel_user_id: str) -> UUID:
             },
             on_conflict="channel,channel_user_id",
             ignore_duplicates=False,
+            returning="representation",
         )
         .execute()
     )
 
-    if not insert_result.data:
-        # Race condition: another request created the user between our check and insert
-        # Re-fetch to get the existing user
-        retry = (
+    row = _extract_row(result)
+    if row is None:
+        # Defensive fallback in case PostgREST returns minimal/no representation.
+        retry = await (
             db.table("users")
             .select("id")
             .eq("channel", channel)
@@ -102,8 +90,31 @@ async def get_or_create_user(channel: str, channel_user_id: str) -> UUID:
             .single()
             .execute()
         )
-        return UUID(retry.data["id"])
+        row = _extract_row(retry)
+        if row is None:
+            raise RuntimeError(
+                "Failed to resolve user after upsert " f"for channel={channel} channel_user_id={channel_user_id}"
+            )
+        return UUID(row["id"])
 
-    user_id = UUID(insert_result.data[0]["id"])
-    logger.info("gateway.user.created", channel=channel, channel_user_id=channel_user_id, user_id=str(user_id))
+    user_id = UUID(row["id"])
+    logger.info(
+        "gateway.user.created",
+        channel=channel,
+        channel_user_id=channel_user_id,
+        user_id=str(user_id),
+    )
     return user_id
+
+
+def _extract_row(result: object) -> dict | None:
+    """Safely normalize Supabase response to a single row dict."""
+    if not result or not getattr(result, "data", None):
+        return None
+
+    data = result.data
+    if isinstance(data, dict):
+        return data
+    if isinstance(data, list):
+        return data[0] if data else None
+    return None

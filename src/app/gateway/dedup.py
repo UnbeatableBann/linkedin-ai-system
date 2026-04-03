@@ -28,18 +28,22 @@ async def is_duplicate(msg: NormalisedMessage) -> bool:
     This is intentionally a "mark then check" pattern (not "check then mark")
     to be safe under concurrent delivery.
     """
-    db = get_db()
+    db = await get_db()
     key = msg.idempotency_key
 
     try:
-        db.table("webhook_log").insert(
-            {
-                "idempotency_key": key,
-                "channel": msg.channel,
-                "user_channel_id": msg.channel_user_id,
-                "payload": msg.raw,
-            }
-        ).execute()
+        await (
+            db.table("webhook_log")
+            .insert(
+                {
+                    "idempotency_key": key,
+                    "channel": msg.channel,
+                    "user_channel_id": msg.channel_user_id,
+                    "payload": msg.raw,
+                }
+            )
+            .execute()
+        )
         logger.debug("dedup.new", key=key)
         return False  # New message — process it
 

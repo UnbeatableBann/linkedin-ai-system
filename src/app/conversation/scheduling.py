@@ -11,8 +11,7 @@ Features:
   - Two-step confirm: parse → show → user confirms → enqueue
 """
 
-from datetime import datetime, timedelta, timezone
-from typing import Any
+from datetime import UTC, datetime, timedelta
 
 import dateparser
 import pytz
@@ -29,8 +28,18 @@ logger = get_logger(__name__)
 
 # Phrases that mean "yes, confirm this time slot"
 CONFIRM_PHRASES = {
-    "yes", "confirm", "ok", "okay", "go", "sure", "sounds good",
-    "that works", "perfect", "yep", "yup", "✅",
+    "yes",
+    "confirm",
+    "ok",
+    "okay",
+    "go",
+    "sure",
+    "sounds good",
+    "that works",
+    "perfect",
+    "yep",
+    "yup",
+    "✅",
 }
 
 
@@ -81,7 +90,7 @@ async def handle_scheduling(
         return
 
     # Must be in the future (at least 5 minutes from now)
-    now_utc = datetime.now(timezone.utc)
+    now_utc = datetime.now(UTC)
     if parsed_dt < now_utc + timedelta(minutes=5):
         next_slot = _next_auto_slot(user_tz)
         await sender.send_text(
@@ -110,8 +119,7 @@ async def handle_scheduling(
 
     await sender.send_text(
         msg.channel_user_id,
-        f"Schedule for *{local_str}*?\n\n"
-        "Reply *yes* to confirm or send a different time.",
+        f"Schedule for *{local_str}*?\n\n" "Reply *yes* to confirm or send a different time.",
     )
 
 
@@ -160,10 +168,7 @@ async def handle_schedule_command(
     else:
         await sender.send_text(
             msg.channel_user_id,
-            "Unknown subcommand. Try:\n"
-            "• /schedule list\n"
-            "• /schedule auto\n"
-            "• /schedule cancel {post_id}",
+            "Unknown subcommand. Try:\n" "• /schedule list\n" "• /schedule auto\n" "• /schedule cancel {post_id}",
         )
 
 
@@ -196,8 +201,8 @@ async def _confirm_and_enqueue(
         return
 
     # Save post to DB
-    db = get_db()
-    post_result = (
+    db = await get_db()
+    post_result = await (
         db.table("posts")
         .insert(
             {
@@ -217,7 +222,7 @@ async def _confirm_and_enqueue(
         )
         .execute()
     )
-    if not post_result.data:
+    if not post_result or not post_result.data:
         await sender.send_text(
             msg.channel_user_id,
             "Failed to save your post. Please try again or /cancel to start fresh.",
@@ -239,9 +244,10 @@ async def _confirm_and_enqueue(
 
     # Also enqueue a reminder 1 hour before
     reminder_time = scheduled_for - timedelta(hours=1)
-    now_utc = datetime.now(timezone.utc)
+    now_utc = datetime.now(UTC)
     if reminder_time > now_utc:
         from app.scheduler.tasks import send_reminder_task
+
         send_reminder_task.apply_async(
             kwargs={
                 "user_id": str(user.id),
@@ -260,6 +266,7 @@ async def _confirm_and_enqueue(
 
     # Update style memory from this approved post (async, non-blocking)
     from app.scheduler.tasks import update_style_memory_task
+
     update_style_memory_task.delay(user_id=str(user.id), content=content)
 
     await sender.send_text(
@@ -283,11 +290,12 @@ async def _confirm_and_enqueue(
 async def _check_conflict(user_id: str, proposed_dt: datetime) -> bool:
     """Check if user already has a post scheduled within ±30 minutes."""
     from app.config import get_settings
+
     settings = get_settings()
     window = timedelta(minutes=settings.conflict_window_minutes)
 
-    db = get_db()
-    result = (
+    db = await get_db()
+    result = await (
         db.table("posts")
         .select("id")
         .eq("user_id", user_id)
@@ -296,13 +304,13 @@ async def _check_conflict(user_id: str, proposed_dt: datetime) -> bool:
         .lte("scheduled_for", (proposed_dt + window).isoformat())
         .execute()
     )
-    return len(result.data) > 0
+    return len(result.data) > 0 if result and result.data else False
 
 
 async def _handle_list(sender: object, channel_user_id: str, user_id: str) -> None:
     """Show the user's upcoming scheduled posts."""
-    db = get_db()
-    result = (
+    db = await get_db()
+    result = await (
         db.table("posts")
         .select("id, content, status, scheduled_for")
         .eq("user_id", user_id)
@@ -312,7 +320,7 @@ async def _handle_list(sender: object, channel_user_id: str, user_id: str) -> No
         .execute()
     )
 
-    if not result.data:
+    if not result or not result.data:
         await sender.send_text(channel_user_id, "No upcoming scheduled posts. Send me a topic to write one!")
         return
 
@@ -327,29 +335,30 @@ async def _handle_list(sender: object, channel_user_id: str, user_id: str) -> No
 
 async def _handle_toggle_auto(sender: object, channel_user_id: str, user_id: str) -> None:
     """Toggle Mon/Fri auto-scheduling on or off."""
-    db = get_db()
-    result = (
-        db.table("user_schedules")
-        .select("enabled")
-        .eq("user_id", user_id)
-        .maybe_single()
-        .execute()
-    )
+    db = await get_db()
+    result = await db.table("user_schedules").select("enabled").eq("user_id", user_id).maybe_single().execute()
 
-    current = result.data["enabled"] if result.data else False
+    current = result.data["enabled"] if result and result.data else False
     new_state = not current
 
-    db.table("user_schedules").upsert(
-        {"user_id": user_id, "enabled": new_state},
-        on_conflict="user_id",
-    ).execute()
+    await (
+        db.table("user_schedules")
+        .upsert(
+            {"user_id": user_id, "enabled": new_state},
+            on_conflict="user_id",
+        )
+        .execute()
+    )
 
     status = "ON ✅" if new_state else "OFF ❌"
     await sender.send_text(
         channel_user_id,
         f"Auto-schedule is now *{status}*\n\n"
-        + ("Posts will be queued for the next Mon/Fri 9am slot automatically." if new_state
-           else "Posts will require manual scheduling."),
+        + (
+            "Posts will be queued for the next Mon/Fri 9am slot automatically."
+            if new_state
+            else "Posts will require manual scheduling."
+        ),
     )
 
 
@@ -360,8 +369,8 @@ async def _handle_cancel_post(
     post_id_prefix: str,
 ) -> None:
     """Cancel a scheduled post by ID (or ID prefix)."""
-    db = get_db()
-    result = (
+    db = await get_db()
+    result = await (
         db.table("posts")
         .select("id, status, zernio_post_id, content")
         .eq("user_id", user_id)
@@ -370,7 +379,7 @@ async def _handle_cancel_post(
         .execute()
     )
 
-    if not result.data:
+    if not result or not result.data:
         await sender.send_text(channel_user_id, f"No post found with ID starting with `{post_id_prefix}`.")
         return
 
@@ -390,9 +399,10 @@ async def _handle_cancel_post(
     # Cancel in Zernio if it has a Zernio ID
     if post.get("zernio_post_id"):
         try:
-            user_result = db.table("users").select("zernio_api_key_enc").eq("id", user_id).single().execute()
+            user_result = await db.table("users").select("zernio_api_key_enc").eq("id", user_id).single().execute()
             from app.core.encryption import decrypt
             from app.zernio.client import ZernioClient
+
             api_key = decrypt(user_result.data["zernio_api_key_enc"])
             client = ZernioClient(api_key=api_key)
             await client.cancel_post(post["zernio_post_id"])
@@ -400,8 +410,8 @@ async def _handle_cancel_post(
             logger.warning("scheduling.zernio_cancel_failed", error=str(exc))
 
     # Mark as cancelled in our DB
-    db.table("posts").update({"status": "cancelled"}).eq("id", post["id"]).execute()
-    db.table("schedule_jobs").update({"status": "cancelled"}).eq("post_id", post["id"]).execute()
+    await db.table("posts").update({"status": "cancelled"}).eq("id", post["id"]).execute()
+    await db.table("schedule_jobs").update({"status": "cancelled"}).eq("post_id", post["id"]).execute()
 
     await sender.send_text(
         channel_user_id,
@@ -416,7 +426,7 @@ def _parse_datetime(text: str, user_tz: pytz.BaseTzInfo) -> datetime | None:
     """
     # Handle "now" / "immediately" separately
     if text.lower() in ("now", "immediately", "right now", "today now"):
-        return datetime.now(timezone.utc) + timedelta(minutes=1)
+        return datetime.now(UTC) + timedelta(minutes=1)
 
     # Handle "auto" — next Mon/Fri slot
     if text.lower() in ("auto", "auto schedule", "next slot"):
@@ -435,7 +445,7 @@ def _parse_datetime(text: str, user_tz: pytz.BaseTzInfo) -> datetime | None:
         return None
 
     # Convert to UTC
-    return parsed.astimezone(timezone.utc)
+    return parsed.astimezone(UTC)
 
 
 def _next_auto_slot(user_tz: pytz.BaseTzInfo) -> datetime:
@@ -447,10 +457,10 @@ def _next_auto_slot(user_tz: pytz.BaseTzInfo) -> datetime:
         candidate = now_local + timedelta(days=days_ahead)
         if candidate.weekday() in target_days:
             slot = candidate.replace(hour=9, minute=0, second=0, microsecond=0)
-            return slot.astimezone(timezone.utc)
+            return slot.astimezone(UTC)
 
     # Fallback: 7 days from now
-    return (now_local + timedelta(days=7)).astimezone(timezone.utc)
+    return (now_local + timedelta(days=7)).astimezone(UTC)
 
 
 def _suggest_next_slot(conflicted_dt: datetime, user_tz: pytz.BaseTzInfo) -> datetime:
@@ -462,7 +472,7 @@ def _suggest_next_slot(conflicted_dt: datetime, user_tz: pytz.BaseTzInfo) -> dat
         candidate = local_dt + timedelta(days=days_ahead)
         if candidate.weekday() in target_days:
             slot = candidate.replace(hour=9, minute=0, second=0, microsecond=0)
-            return slot.astimezone(timezone.utc)
+            return slot.astimezone(UTC)
 
     return conflicted_dt + timedelta(days=7)
 

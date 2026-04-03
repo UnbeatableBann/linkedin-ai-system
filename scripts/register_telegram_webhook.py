@@ -17,7 +17,6 @@ For local dev with ngrok:
 """
 
 import argparse
-import os
 import sys
 from pathlib import Path
 
@@ -70,13 +69,14 @@ def main() -> None:
         "drop_pending_updates": True,
     }
 
-    print(f"\nRegistering Telegram webhook:")
+    print("\nRegistering Telegram webhook:")
     print(f"  Webhook URL: {webhook_url}")
     print(f"  Secret token: {secret[:8]}...{secret[-4:] if secret else ''}")
 
     if args.dry_run:
         print("\n[DRY RUN] Would send:")
         import json
+
         print(json.dumps(payload, indent=2))
         return
 
@@ -84,7 +84,7 @@ def main() -> None:
         resp = httpx.post(api_url, json=payload, timeout=10)
         data = resp.json()
         if data.get("ok"):
-            print(f"\n  ✅ Webhook registered successfully!")
+            print("\n  ✅ Webhook registered successfully!")
             print(f"  Description: {data.get('description', '')}")
         else:
             print(f"\n  ❌ Registration failed: {data}")
@@ -98,7 +98,7 @@ def main() -> None:
     try:
         resp = httpx.get(verify_url, timeout=10)
         info = resp.json().get("result", {})
-        print(f"\n  Webhook info:")
+        print("\n  Webhook info:")
         print(f"    URL: {info.get('url', 'not set')}")
         print(f"    Pending updates: {info.get('pending_update_count', 0)}")
         if info.get("last_error_message"):

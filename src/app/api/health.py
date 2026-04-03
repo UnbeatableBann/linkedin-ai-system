@@ -5,7 +5,7 @@ Health check endpoint for Railway/Render uptime monitoring.
 Also checks Supabase and Redis connectivity.
 """
 
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 from fastapi import APIRouter
 
@@ -28,8 +28,9 @@ async def health_check() -> dict:
     # ── Supabase ─────────────────────────────────────────────────────────────
     try:
         from app.db.client import get_db
-        db = get_db()
-        db.table("users").select("id").limit(1).execute()
+
+        db = await get_db()
+        await db.table("users").select("id").limit(1).execute()
         checks["supabase"] = "ok"
     except Exception as exc:
         logger.error("health.supabase_failed", error=str(exc))
@@ -40,6 +41,7 @@ async def health_check() -> dict:
         import redis as redis_lib
 
         from app.config import get_settings
+
         settings = get_settings()
         r = redis_lib.from_url(settings.redis_url, socket_connect_timeout=2)
         r.ping()
@@ -52,6 +54,6 @@ async def health_check() -> dict:
 
     return {
         "status": overall,
-        "timestamp": datetime.now(timezone.utc).isoformat(),
+        "timestamp": datetime.now(UTC).isoformat(),
         "checks": checks,
     }

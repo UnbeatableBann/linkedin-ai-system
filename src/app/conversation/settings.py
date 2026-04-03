@@ -20,8 +20,8 @@ async def handle_settings(
     prefs = user.style_prefs
 
     # Fetch schedule info
-    db = get_db()
-    sched = (
+    db = await get_db()
+    sched = await (
         db.table("user_schedules")
         .select("enabled, days_of_week, time_of_day")
         .eq("user_id", str(user.id))
@@ -58,11 +58,11 @@ async def handle_settings(
     if body.startswith("tone:"):
         new_tone = msg.text.split(":", 1)[1].strip()
         prefs["tone"] = new_tone
-        db.table("users").update({"style_prefs": prefs}).eq("id", str(user.id)).execute()
+        await db.table("users").update({"style_prefs": prefs}).eq("id", str(user.id)).execute()
         await sender.send_text(msg.channel_user_id, f"Default tone updated to: *{new_tone}*")
 
     elif body.startswith("audience:"):
         new_audience = msg.text.split(":", 1)[1].strip()
         prefs["audience"] = new_audience
-        db.table("users").update({"style_prefs": prefs}).eq("id", str(user.id)).execute()
+        await db.table("users").update({"style_prefs": prefs}).eq("id", str(user.id)).execute()
         await sender.send_text(msg.channel_user_id, f"Default audience updated to: *{new_audience}*")

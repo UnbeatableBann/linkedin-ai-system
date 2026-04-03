@@ -80,6 +80,7 @@ async def whatsapp_webhook(
 
     # ── Mark as read (shows double blue ticks to user) ───────────────────────
     from app.channels.whatsapp import WhatsAppSender
+
     try:
         sender = WhatsAppSender()
         await sender.mark_as_read(msg.message_id)

@@ -15,13 +15,14 @@
 #   make clean          Remove containers and volumes
 
 .PHONY: setup up down test test-watch lint format logs logs-worker \
-        shell migrate webhook manage clean rebuild check-env stats
+	shell migrate webhook manage clean rebuild check-env stats \
+	precommit-install precommit-run precommit-all
 
 # ── Setup ──────────────────────────────────────────────────────────────────
 
 setup:
 	@echo "Running setup wizard..."
-	python scripts/setup.py
+	uv run python scripts/setup.py
 
 check-env:
 	@test -f .env || (echo "❌ .env not found. Run: make setup" && exit 1)
@@ -29,8 +30,12 @@ check-env:
 
 # ── Docker ─────────────────────────────────────────────────────────────────
 
-up: check-env
-	docker-compose up --build -d
+login:
+	@echo "Logging in to Docker Hub..."
+	docker login
+
+up:
+	docker compose up --build
 	@echo ""
 	@echo "✓ Services started:"
 	@echo "  API:    http://localhost:8000"
@@ -44,7 +49,7 @@ down:
 
 rebuild: down
 	docker-compose build --no-cache
-	docker-compose up -d
+	docker-compose up
 
 clean:
 	docker-compose down -v --remove-orphans
@@ -70,64 +75,78 @@ shell:
 shell-worker:
 	docker-compose exec worker /bin/bash
 
+prod-fastapi:
+	gunicorn app:app --workers 4 --worker-class uvicorn.workers.UvicornWorker --bind 0.0.0.0:8000
+
 # ── Testing ────────────────────────────────────────────────────────────────
 
 test:
-	pytest tests/ -v --tb=short
+	uv run pytest tests/ -v --tb=short
 
 test-fast:
-	pytest tests/ -v --tb=short -x  # Stop on first failure
+	uv run pytest tests/ -v --tb=short -x  # Stop on first failure
 
 test-watch:
-	ptw tests/ -- -v --tb=short  # pip install pytest-watch
+	uv run ptw tests/ -- -v --tb=short  # uv add --dev pytest-watch
 
 test-coverage:
-	pytest tests/ --cov=app --cov-report=term-missing --cov-report=html
+	uv run pytest tests/ --cov=app --cov-report=term-missing --cov-report=html
 	@echo "Coverage report: htmlcov/index.html"
 
 test-unit:
-	pytest tests/test_fsm.py tests/test_post_rules.py tests/test_channels.py \
+	uv run pytest tests/test_fsm.py tests/test_post_rules.py tests/test_channels.py \
 	       tests/test_dedup.py tests/test_encryption.py tests/test_style_memory.py \
 	       tests/test_rate_limiter.py -v --tb=short
 
 test-integration:
-	pytest tests/test_integration_gateway.py tests/test_scheduling.py -v --tb=short
+	uv run pytest tests/test_integration_gateway.py tests/test_scheduling.py -v --tb=short
 
 # ── Code quality ───────────────────────────────────────────────────────────
 
 lint:
-	ruff check app/ tests/ scripts/
+	uv run ruff check src/app tests scripts
 	@echo "✓ Lint passed"
 
 format:
-	ruff format app/ tests/ scripts/
+	uv run ruff format src/app tests scripts
 	@echo "✓ Formatted"
 
 format-check:
-	ruff format --check app/ tests/ scripts/
+	uv run ruff format --check src/app tests scripts
 
 typecheck:
-	mypy app/ --ignore-missing-imports
+	uv run mypy src/app --ignore-missing-imports
 
 check: lint format-check typecheck test
 	@echo "✓ All checks passed"
 
+precommit-install:
+	uv run pre-commit install
+	uv run pre-commit install --hook-type pre-push
+	@echo "✓ pre-commit hooks installed"
+
+precommit-run:
+	uv run pre-commit run
+
+precommit-all:
+	uv run pre-commit run --all-files
+
 # ── Deployment helpers ─────────────────────────────────────────────────────
 
 webhook:
-	python scripts/register_telegram_webhook.py
+	uv run python scripts/register_telegram_webhook.py
 
 webhook-dry:
-	python scripts/register_telegram_webhook.py --dry-run
+	uv run python scripts/register_telegram_webhook.py --dry-run
 
 migrate:
 	@echo ""
 	@echo "Manual step — run this SQL in Supabase Dashboard → SQL Editor:"
-	@echo "  File: app/db/migrations/001_initial.sql"
+	@echo "  File: src/app/db/migrations/001_initial.sql"
 	@echo ""
 	@echo "  1. Open: https://app.supabase.com → your project → SQL Editor"
 	@echo "  2. Click 'New query'"
-	@echo "  3. Paste the contents of app/db/migrations/001_initial.sql"
+	@echo "  3. Paste the contents of src/app/db/migrations/001_initial.sql"
 	@echo "  4. Click 'Run'"
 	@echo ""
 
@@ -137,16 +156,16 @@ migrate:
 #        make manage CMD="posts list --status=scheduled"
 #        make manage CMD="db stats"
 manage:
-	python scripts/manage.py $(CMD)
+	uv run python scripts/manage.py $(CMD)
 
 stats:
-	python scripts/manage.py db stats
+	uv run python scripts/manage.py db stats
 
 users:
-	python scripts/manage.py users list
+	uv run python scripts/manage.py users list
 
 jobs:
-	python scripts/manage.py jobs list
+	uv run python scripts/manage.py jobs list
 
 # ── Local dev helpers ──────────────────────────────────────────────────────
 
@@ -158,12 +177,12 @@ ngrok:
 	ngrok http 8000
 
 install-dev:
-	pip install -e ".[dev]"
+	uv sync --all-extras
 
 # ── Health checks ──────────────────────────────────────────────────────────
 
 health:
-	curl -s http://localhost:8000/health | python -m json.tool
+	curl -s http://localhost:8000/health | uv run python -m json.tool
 
 health-wait:
 	@echo "Waiting for API to be healthy..."

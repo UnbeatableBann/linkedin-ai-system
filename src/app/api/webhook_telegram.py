@@ -8,7 +8,7 @@ We verify the signature, parse the update, and hand off to the gateway.
 Always returns 200 — Telegram retries on non-200.
 """
 
-from fastapi import APIRouter, Header, HTTPException, Request, status
+from fastapi import APIRouter, Header, Request, status
 
 from app.channels.telegram import parse_telegram_update, verify_telegram_signature
 from app.core.logging import get_logger

@@ -14,62 +14,85 @@ Or for just the logic layer (no running server needed):
 Exit code 0 = all passed. Exit code 1 = failures.
 """
 
-import argparse
-import asyncio
+# ruff: noqa: E402
 import os
 import sys
 import time
 from pathlib import Path
-from unittest.mock import AsyncMock, MagicMock, patch
+from unittest.mock import MagicMock
 
 ROOT = Path(__file__).parent.parent
-sys.path.insert(0, str(ROOT))
+sys.path.insert(0, str(ROOT / "src"))
 
 # ── Stubs for packages not in this test environment ───────────────────────
 import types
 
-_stubs = ["structlog", "supabase", "pydantic", "pydantic_settings",
-          "dateparser", "pytz", "redis", "anthropic", "openai", "groq",
-          "celery", "httpx", "fastapi"]
+_stubs = [
+    "structlog",
+    "supabase",
+    "pydantic",
+    "pydantic_settings",
+    "dateparser",
+    "pytz",
+    "redis",
+    "anthropic",
+    "openai",
+    "groq",
+    "celery",
+    "httpx",
+    "fastapi",
+]
 for mod in _stubs:
     if mod not in sys.modules:
         sys.modules[mod] = MagicMock()
 
 # Give pytz realistic behaviour whether real or mocked
 import pytz as _pytz_ref  # noqa — always works now (either real or mocked above)
+
 _pytz_ref.exceptions = types.SimpleNamespace(UnknownTimeZoneError=ValueError)
 
 if isinstance(_pytz_ref, MagicMock):
+
     class _FakeTZ:
         def __init__(self, name="UTC"):
             self.zone = name
-        def astimezone(self, tz=None): return self
-        def __str__(self): return self.zone
+
+        def astimezone(self, tz=None):
+            return self
+
+        def __str__(self):
+            return self.zone
+
     _pytz_ref.timezone = _FakeTZ
     _pytz_ref.UTC = _FakeTZ("UTC")
 
 # Set required env vars
 from cryptography.fernet import Fernet
+
 _test_key = Fernet.generate_key().decode()
-os.environ.update({
-    "FERNET_SECRET_KEY": _test_key,
-    "TELEGRAM_BOT_TOKEN": "123:smoke_test_bot",
-    "TELEGRAM_WEBHOOK_SECRET": "s" * 32,
-    "SUPABASE_URL": "https://smoke.supabase.co",
-    "SUPABASE_SERVICE_KEY": "x" * 40,
-    "WHATSAPP_APP_SECRET": "smoke_secret",
-    "WHATSAPP_ACCESS_TOKEN": "smoke_token",
-    "WHATSAPP_PHONE_NUMBER_ID": "999",
-    "WHATSAPP_VERIFY_TOKEN": "smoke_verify",
-    "OAUTH_CALLBACK_BASE_URL": "https://smoke.example.com",
-    "APP_ENV": "development",
-})
+os.environ.update(
+    {
+        "FERNET_SECRET_KEY": _test_key,
+        "TELEGRAM_BOT_TOKEN": "123:smoke_test_bot",
+        "TELEGRAM_WEBHOOK_SECRET": "s" * 32,
+        "SUPABASE_URL": "https://smoke.supabase.co",
+        "SUPABASE_SERVICE_KEY": "x" * 40,
+        "WHATSAPP_APP_SECRET": "smoke_secret",
+        "WHATSAPP_ACCESS_TOKEN": "smoke_token",
+        "WHATSAPP_PHONE_NUMBER_ID": "999",
+        "WHATSAPP_VERIFY_TOKEN": "smoke_verify",
+        "OAUTH_CALLBACK_BASE_URL": "https://smoke.example.com",
+        "APP_ENV": "development",
+    }
+)
 
 from app.config import get_settings
+
 get_settings.cache_clear()
 
 
 # ── Test runner ────────────────────────────────────────────────────────────
+
 
 class SmokeRunner:
     def __init__(self):
@@ -117,7 +140,7 @@ except Exception as e:
     t.fail("settings load", str(e))
 
 try:
-    from app.core.encryption import encrypt, decrypt, EncryptionError
+    from app.core.encryption import EncryptionError, decrypt, encrypt
 
     original = "sk-ant-api03-super-secret-key-for-testing"
     token = encrypt(original)
@@ -130,6 +153,7 @@ except Exception as e:
 
 try:
     from app.core.encryption import EncryptionError, decrypt
+
     decrypt("not_a_valid_fernet_token_at_all")
     t.fail("invalid decrypt should raise")
 except EncryptionError:
@@ -141,29 +165,29 @@ except EncryptionError:
 # ══════════════════════════════════════════════════════════════════════════
 t.section("FSM — All 8 States, 15 Transitions")
 
-from app.session.fsm import transition, can_transition, Event, InvalidTransitionError
+from app.session.fsm import Event, InvalidTransitionError, transition
 from app.session.models import SessionState
 
 # Every named transition
 transitions = [
-    (SessionState.IDLE,       Event.START_ONBOARDING,   SessionState.ONBOARDING),
-    (SessionState.IDLE,       Event.START_POST,          SessionState.COLLECTING),
-    (SessionState.IDLE,       Event.START_POST_DIRECT,   SessionState.GENERATING),
-    (SessionState.ONBOARDING, Event.ONBOARDING_DONE,     SessionState.IDLE),
-    (SessionState.COLLECTING, Event.ENOUGH_INFO,         SessionState.GENERATING),
-    (SessionState.COLLECTING, Event.START_POST_DIRECT,   SessionState.GENERATING),
-    (SessionState.GENERATING, Event.DRAFT_READY,         SessionState.REVIEWING),
-    (SessionState.GENERATING, Event.GENERATION_FAILED,   SessionState.COLLECTING),
-    (SessionState.REVIEWING,  Event.REQUEST_EDIT,        SessionState.REFINING),
-    (SessionState.REVIEWING,  Event.APPROVE_DRAFT,       SessionState.SCHEDULING),
-    (SessionState.REVIEWING,  Event.DISCARD_DRAFT,       SessionState.IDLE),
-    (SessionState.REFINING,   Event.REFINEMENT_READY,    SessionState.REVIEWING),
-    (SessionState.REFINING,   Event.REFINEMENT_FAILED,   SessionState.REVIEWING),
-    (SessionState.SCHEDULING, Event.SCHEDULE_CONFIRMED,  SessionState.SCHEDULED),
-    (SessionState.SCHEDULING, Event.SCHEDULE_CANCELLED,  SessionState.IDLE),
+    (SessionState.IDLE, Event.START_ONBOARDING, SessionState.ONBOARDING),
+    (SessionState.IDLE, Event.START_POST, SessionState.COLLECTING),
+    (SessionState.IDLE, Event.START_POST_DIRECT, SessionState.GENERATING),
+    (SessionState.ONBOARDING, Event.ONBOARDING_DONE, SessionState.IDLE),
+    (SessionState.COLLECTING, Event.ENOUGH_INFO, SessionState.GENERATING),
+    (SessionState.COLLECTING, Event.START_POST_DIRECT, SessionState.GENERATING),
+    (SessionState.GENERATING, Event.DRAFT_READY, SessionState.REVIEWING),
+    (SessionState.GENERATING, Event.GENERATION_FAILED, SessionState.COLLECTING),
+    (SessionState.REVIEWING, Event.REQUEST_EDIT, SessionState.REFINING),
+    (SessionState.REVIEWING, Event.APPROVE_DRAFT, SessionState.SCHEDULING),
+    (SessionState.REVIEWING, Event.DISCARD_DRAFT, SessionState.IDLE),
+    (SessionState.REFINING, Event.REFINEMENT_READY, SessionState.REVIEWING),
+    (SessionState.REFINING, Event.REFINEMENT_FAILED, SessionState.REVIEWING),
+    (SessionState.SCHEDULING, Event.SCHEDULE_CONFIRMED, SessionState.SCHEDULED),
+    (SessionState.SCHEDULING, Event.SCHEDULE_CANCELLED, SessionState.IDLE),
 ]
 
-wrong = [(s,e,transition(s,e),d) for s,e,d in transitions if transition(s,e) != d]
+wrong = [(s, e, transition(s, e), d) for s, e, d in transitions if transition(s, e) != d]
 if not wrong:
     t.ok("all 15 named transitions correct")
 else:
@@ -235,12 +259,22 @@ except Exception as e:
 # ══════════════════════════════════════════════════════════════════════════
 t.section("Channel Parsing — Telegram")
 
-from app.channels.telegram import parse_telegram_update, _split_message
 from app.channels.base import MessageType
+from app.channels.telegram import _split_message, parse_telegram_update
+
 
 def tg(text, cid=42, mid=1):
-    return {"update_id":1,"message":{"message_id":mid,"chat":{"id":cid,"type":"private"},
-            "from":{"id":cid},"text":text,"date":0}}
+    return {
+        "update_id": 1,
+        "message": {
+            "message_id": mid,
+            "chat": {"id": cid, "type": "private"},
+            "from": {"id": cid},
+            "text": text,
+            "date": 0,
+        },
+    }
+
 
 try:
     m = parse_telegram_update(tg("Hello world", cid=99, mid=77))
@@ -255,10 +289,10 @@ except Exception as e:
 
 try:
     cmds = [
-        ("/start",          "/start",    None),
-        ("/cancel abc",     "/cancel",   "abc"),
-        ("/schedule list",  "/schedule", "list"),
-        ("/start@MyBot",    "/start",    None),
+        ("/start", "/start", None),
+        ("/cancel abc", "/cancel", "abc"),
+        ("/schedule list", "/schedule", "list"),
+        ("/start@MyBot", "/start", None),
     ]
     ok_count = 0
     for text, ecmd, eargs in cmds:
@@ -282,11 +316,17 @@ except Exception as e:
 
 t.section("Channel Parsing — WhatsApp")
 
-from app.channels.whatsapp import parse_whatsapp_payload, _strip_markdown
+from app.channels.whatsapp import _strip_markdown, parse_whatsapp_payload
+
 
 def wa(text, phone="919876543210", mid="wamid.001"):
-    return {"object":"wa","entry":[{"changes":[{"value":{"messages":[
-        {"id":mid,"from":phone,"type":"text","text":{"body":text}}]}}]}]}
+    return {
+        "object": "wa",
+        "entry": [
+            {"changes": [{"value": {"messages": [{"id": mid, "from": phone, "type": "text", "text": {"body": text}}]}}]}
+        ],
+    }
+
 
 try:
     m = parse_whatsapp_payload(wa("Hello LinkedIn"))
@@ -298,16 +338,19 @@ except Exception as e:
     t.fail("whatsapp text parse", str(e))
 
 try:
-    status = {"object":"wa","entry":[{"changes":[{"value":{"statuses":[{"id":"m1"}]}}]}]}
+    status = {"object": "wa", "entry": [{"changes": [{"value": {"statuses": [{"id": "m1"}]}}]}]}
     assert parse_whatsapp_payload(status) is None
-    img = {"object":"wa","entry":[{"changes":[{"value":{"messages":[{"id":"i","from":"1","type":"image","image":{}}]}}]}]}
+    img = {
+        "object": "wa",
+        "entry": [{"changes": [{"value": {"messages": [{"id": "i", "from": "1", "type": "image", "image": {}}]}}]}],
+    }
     assert parse_whatsapp_payload(img) is None
     t.ok("non-message payloads (status, image) → None")
 except Exception as e:
     t.fail("whatsapp skip conditions", str(e))
 
 try:
-    tests = [("**bold**","bold"),("*italic*","italic"),("`code`","code"),("_ital_","ital")]
+    tests = [("**bold**", "bold"), ("*italic*", "italic"), ("`code`", "code"), ("_ital_", "ital")]
     assert all(_strip_markdown(i) == e for i, e in tests)
     t.ok("markdown stripping: bold, italic, code, underscore")
 except Exception as e:
@@ -319,7 +362,7 @@ except Exception as e:
 # ══════════════════════════════════════════════════════════════════════════
 t.section("Post Rules — Content Enforcement")
 
-from app.content.post_rules import enforce_post_rules, check_post_length, LINKEDIN_MAX_CHARS
+from app.content.post_rules import LINKEDIN_MAX_CHARS, check_post_length, enforce_post_rules
 
 try:
     cases = [
@@ -362,10 +405,12 @@ except Exception as e:
 # ══════════════════════════════════════════════════════════════════════════
 t.section("Style Memory — Signal Extraction & Learning")
 
-from app.content.style_memory import extract_style_signals, merge_style_prefs, build_style_context
+from app.content.style_memory import build_style_context, extract_style_signals, merge_style_prefs
 
 try:
-    post = "I learned three things in 2024:\n\n1. Focus matters\n2. Speed wins\n3. Relationships count\n\n#Startup #India"
+    post = (
+        "I learned three things in 2024:\n\n1. Focus matters\n2. Speed wins\n3. Relationships count\n\n#Startup #India"
+    )
     signals = extract_style_signals(post)
     assert signals["hashtag_count"] == 2
     assert signals["uses_numbered_list"] is True
@@ -422,6 +467,8 @@ except Exception as e:
 # ══════════════════════════════════════════════════════════════════════════
 t.section("Reviewing — Approval & Draft Presentation")
 
+from datetime import UTC
+
 from app.conversation.reviewing import _is_approval, _is_discard, present_draft
 
 try:
@@ -455,14 +502,16 @@ except Exception as e:
 t.section("Scheduling — Date Parsing & Slot Logic")
 
 try:
+    from datetime import datetime
+
     import pytz
-    from app.conversation.scheduling import _next_auto_slot, _suggest_next_slot, _format_dt
-    from datetime import datetime, timedelta, timezone
+
+    from app.conversation.scheduling import _next_auto_slot
 
     IST = pytz.timezone("Asia/Kolkata") if not isinstance(pytz, MagicMock) else MagicMock()
 
     slot = _next_auto_slot(IST)
-    assert slot > datetime.now(timezone.utc)
+    assert slot > datetime.now(UTC)
     local = slot.astimezone(IST)
     assert local.weekday() in {0, 4}
     assert local.hour == 9
@@ -471,8 +520,9 @@ except Exception as e:
     t.fail("next_auto_slot", str(e))
 
 try:
-    from app.conversation.scheduling import _parse_datetime
     import pytz
+
+    from app.conversation.scheduling import _parse_datetime
 
     IST = pytz.timezone("Asia/Kolkata") if not isinstance(pytz, MagicMock) else MagicMock()
 
@@ -497,12 +547,16 @@ t.section("Error Handling — Types & Messages")
 
 try:
     from app.core.errors import ConfigurationError, format_error_for_user
+    from app.core.rate_limiter import LimitType, RateLimitExceeded
     from app.zernio.client import ZernioError
-    from app.content.llm_client import LLMError
-    from app.core.rate_limiter import RateLimitExceeded, LimitType
 
     # ConfigurationError gives specific messages
-    for missing, word in [("zernio_key","Zernio"), ("llm_key","AI"), ("linkedin","LinkedIn"), ("timezone","timezone")]:
+    for missing, word in [
+        ("zernio_key", "Zernio"),
+        ("llm_key", "AI"),
+        ("linkedin", "LinkedIn"),
+        ("timezone", "timezone"),
+    ]:
         msg = ConfigurationError(missing).user_message()
         assert word.lower() in msg.lower(), f"'{word}' not in message for '{missing}'"
     t.ok("ConfigurationError: specific messages for all 4 missing types")
@@ -533,9 +587,9 @@ except Exception as e:
 t.section("Full Conversation — Simulated Happy Path")
 
 try:
-    from app.session.fsm import transition, Event
-    from app.session.models import SessionState, SessionContext
     from app.content.post_rules import enforce_post_rules
+    from app.session.fsm import Event, transition
+    from app.session.models import SessionContext, SessionState
 
     # Simulate the complete happy path without any I/O
     state = SessionState.IDLE
@@ -607,8 +661,8 @@ except Exception as e:
 t.section("Cancel Path — Universal Escape Hatch")
 
 try:
-    from app.session.fsm import transition, Event
-    from app.session.models import SessionState, SessionContext
+    from app.session.fsm import Event, transition
+    from app.session.models import SessionContext, SessionState
 
     for state in SessionState:
         ctx = SessionContext()

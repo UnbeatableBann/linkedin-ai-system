@@ -16,6 +16,7 @@ from typing import Any
 import httpx
 
 from app.core.logging import get_logger
+from app.db.models import UserRow
 
 logger = get_logger(__name__)
 
@@ -84,10 +85,7 @@ class ZernioClient:
         """
         data = await self._get("/accounts")
         accounts = data.get("accounts", [])
-        return [
-            ZernioAccount(id=a["_id"], platform=a["platform"], name=a.get("name", ""))
-            for a in accounts
-        ]
+        return [ZernioAccount(id=a["_id"], platform=a["platform"], name=a.get("name", "")) for a in accounts]
 
     async def check_account_health(self, account_id: str) -> bool:
         """
@@ -113,15 +111,13 @@ class ZernioClient:
 
     # ── OAuth / Connect ─────────────────────────────────────────────────────
 
-    async def get_linkedin_oauth_url(
-        self, profile_id: str, redirect_url: str
-    ) -> str:
+    async def get_linkedin_oauth_url(self, profile_id: str, redirect_url: str) -> str:
         """
         Start the LinkedIn OAuth flow in headless mode.
         Returns the authUrl to send to the user.
         """
         data = await self._get(
-            f"/connect/linkedin",
+            "/connect/linkedin",
             params={
                 "profileId": profile_id,
                 "headless": "true",
@@ -264,9 +260,7 @@ class ZernioClient:
             except httpx.TimeoutException:
                 raise ZernioError("Zernio API timed out. Please try again.")
 
-    async def _post_with_headers(
-        self, path: str, body: dict[str, Any], headers: dict[str, str]
-    ) -> dict[str, Any]:
+    async def _post_with_headers(self, path: str, body: dict[str, Any], headers: dict[str, str]) -> dict[str, Any]:
         async with httpx.AsyncClient(timeout=DEFAULT_TIMEOUT) as client:
             try:
                 resp = await client.post(
@@ -295,8 +289,7 @@ def _handle_response(resp: httpx.Response) -> dict[str, Any]:
     """Parse response and raise ZernioError for non-2xx status codes."""
     if resp.status_code == 401:
         raise ZernioError(
-            "Your Zernio API key is invalid or expired. "
-            "Please check your key at zernio.com → Settings → API Keys.",
+            "Your Zernio API key is invalid or expired. " "Please check your key at zernio.com → Settings → API Keys.",
             status_code=401,
         )
     if resp.status_code == 429:
@@ -314,7 +307,8 @@ def _handle_response(resp: httpx.Response) -> dict[str, Any]:
             detail = resp.json().get("message", resp.text)
         except Exception:
             detail = resp.text
-        raise ZernioError(f"Zernio error: {detail}", status_code=resp.status_code)
+        clean_detail = _sanitize_error_detail(detail)
+        raise ZernioError(f"Zernio error: {clean_detail}", status_code=resp.status_code)
 
     try:
         return resp.json()
@@ -322,16 +316,30 @@ def _handle_response(resp: httpx.Response) -> dict[str, Any]:
         return {}
 
 
-def make_zernio_client(user: "UserRow") -> ZernioClient:
+def make_zernio_client(user: UserRow) -> ZernioClient:
     """
     Convenience factory that decrypts the user's stored API key
     and returns a ready-to-use ZernioClient.
     """
     from app.core.encryption import decrypt
-    from app.db.models import UserRow
 
     if not user.zernio_api_key_enc:
         raise ZernioError("No Zernio API key on file. Please run /start to set one up.")
 
     api_key = decrypt(user.zernio_api_key_enc)
     return ZernioClient(api_key=api_key)
+
+
+def _sanitize_error_detail(detail: Any) -> str:
+    """Normalize API error text for safe user-facing messages."""
+    text = str(detail or "Request rejected by Zernio.")
+
+    lower = text.lower()
+    if "<!doctype html" in lower or "<html" in lower:
+        return "Unexpected response from Zernio. Please try again in a moment."
+
+    text = " ".join(text.split())
+    if len(text) > 220:
+        text = text[:220].rstrip() + "..."
+
+    return text

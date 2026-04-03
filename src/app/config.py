@@ -8,9 +8,12 @@ with a clear error message — no silent failures.
 
 from enum import StrEnum
 from functools import lru_cache
+from pathlib import Path
 
 from pydantic import Field, field_validator, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
+
+ROOT = Path(__file__).parent.parent
 
 
 class AppEnv(StrEnum):
@@ -27,7 +30,7 @@ class LogLevel(StrEnum):
 
 class Settings(BaseSettings):
     model_config = SettingsConfigDict(
-        env_file="../.env",
+        env_file=ROOT / ".env",
         env_file_encoding="utf-8",
         case_sensitive=False,
         extra="ignore",
@@ -60,9 +63,7 @@ class Settings(BaseSettings):
     whatsapp_verify_token: str = Field(..., description="Token for Meta webhook challenge")
 
     # ── OAuth ──────────────────────────────────────────────────
-    oauth_callback_base_url: str = Field(
-        ..., description="Public base URL for Zernio OAuth callback"
-    )
+    oauth_callback_base_url: str = Field(..., description="Public base URL for Zernio OAuth callback")
 
     # ── Derived / constants ────────────────────────────────────
     session_ttl_hours: int = 24
@@ -84,7 +85,8 @@ class Settings(BaseSettings):
         except Exception as exc:
             raise ValueError(
                 "FERNET_SECRET_KEY is invalid. "
-                "Generate one with: python -c \"from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())\""
+                "Generate one with: "
+                'python -c "from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())"'
             ) from exc
         return v
 
@@ -99,10 +101,7 @@ class Settings(BaseSettings):
     @classmethod
     def validate_callback_url(cls, v: str) -> str:
         if not v.startswith("https://") and not v.startswith("http://localhost"):
-            raise ValueError(
-                "OAUTH_CALLBACK_BASE_URL must be an HTTPS URL "
-                "(or http://localhost for local dev)"
-            )
+            raise ValueError("OAUTH_CALLBACK_BASE_URL must be an HTTPS URL " "(or http://localhost for local dev)")
         return v.rstrip("/")
 
     @model_validator(mode="after")
@@ -110,9 +109,7 @@ class Settings(BaseSettings):
         if self.app_env == AppEnv.PRODUCTION:
             # In production, make sure callback URL is HTTPS
             if not self.oauth_callback_base_url.startswith("https://"):
-                raise ValueError(
-                    "OAUTH_CALLBACK_BASE_URL must use HTTPS in production"
-                )
+                raise ValueError("OAUTH_CALLBACK_BASE_URL must use HTTPS in production")
         return self
 
     @property

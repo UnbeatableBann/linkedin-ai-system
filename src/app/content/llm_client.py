@@ -36,7 +36,7 @@ async def call_llm(
 
     Raises LLMError on failure.
     """
-    from app.core.encryption import decrypt, EncryptionError
+    from app.core.encryption import EncryptionError, decrypt
 
     if not user.llm_provider or not user.llm_api_key_enc:
         raise LLMError(
@@ -64,6 +64,8 @@ async def call_llm(
             return await _call_openai(api_key, model, system_prompt, user_prompt, max_tokens)
         elif provider == LLMProvider.GROQ:
             return await _call_groq(api_key, model, system_prompt, user_prompt, max_tokens)
+        elif provider == LLMProvider.GEMINI:
+            return await _call_gemini(api_key, model, system_prompt, user_prompt, max_tokens)
         else:
             raise LLMError(f"Unknown LLM provider: {provider}", retryable=False)
 
@@ -74,9 +76,7 @@ async def call_llm(
         raise LLMError(f"Unexpected error calling {provider}: {str(exc)[:200]}")
 
 
-async def _call_anthropic(
-    api_key: str, model: str, system: str, user: str, max_tokens: int
-) -> str:
+async def _call_anthropic(api_key: str, model: str, system: str, user: str, max_tokens: int) -> str:
     import anthropic
 
     try:
@@ -100,9 +100,7 @@ async def _call_anthropic(
         raise LLMError(f"Anthropic API error: {str(exc)[:200]}", retryable=True)
 
 
-async def _call_openai(
-    api_key: str, model: str, system: str, user: str, max_tokens: int
-) -> str:
+async def _call_openai(api_key: str, model: str, system: str, user: str, max_tokens: int) -> str:
     import openai
 
     try:
@@ -128,9 +126,7 @@ async def _call_openai(
         raise LLMError(f"OpenAI API error: {str(exc)[:200]}", retryable=True)
 
 
-async def _call_groq(
-    api_key: str, model: str, system: str, user: str, max_tokens: int
-) -> str:
+async def _call_groq(api_key: str, model: str, system: str, user: str, max_tokens: int) -> str:
     import groq
 
     try:
@@ -156,10 +152,35 @@ async def _call_groq(
         raise LLMError(f"Groq error: {str(exc)[:200]}", retryable=True)
 
 
+async def _call_gemini(api_key: str, model: str, system: str, user: str, max_tokens: int) -> str:
+    from google import errors, genai
+
+    try:
+        client = genai.Client(api_key=api_key)
+        response = await client.aio.models.generate_content(
+            model=model,
+            contents=[genai.Content(role="user", parts=[genai.Part(text=system + "\n\n" + user)])],
+            config=genai.types.GenerationConfig(max_output_tokens=max_tokens),
+        )
+        return (response.text or "").strip()
+
+    except errors.APIError as exc:
+        if "API key" in str(exc) or "authorization" in str(exc).lower():
+            raise LLMError(
+                "Your Gemini API key is invalid. Update it via /settings.",
+                retryable=False,
+            )
+        raise LLMError(f"Gemini API error: {str(exc)[:200]}", retryable=True)
+
+    except Exception as exc:
+        raise LLMError(f"Gemini error: {str(exc)[:200]}", retryable=True)
+
+
 def _default_model(provider: LLMProvider) -> str:
     defaults = {
         LLMProvider.ANTHROPIC: "claude-haiku-4-5-20251001",
         LLMProvider.OPENAI: "gpt-4o-mini",
         LLMProvider.GROQ: "llama-3.3-70b-versatile",
+        LLMProvider.GEMINI: "gemini-2.0-flash",
     }
     return defaults.get(provider, "")
