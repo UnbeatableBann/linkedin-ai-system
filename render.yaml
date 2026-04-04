@@ -11,38 +11,15 @@ services:
   - type: web
     name: linkedin-ai-api
     runtime: docker
-    dockerfilePath: ./Dockerfile
+    dockerfilePath: ./Dockerfile.render
     dockerContext: .
-    dockerCommand: "uv run uvicorn app.main:app --host 0.0.0.0 --port $PORT --workers 2"
-    plan: starter
+    plan: free
     healthCheckPath: /health
+    autoDeploy: true
+    branch: main
     envVars:
       - key: APP_ENV
         value: production
       - key: LOG_LEVEL
         value: INFO
       # All other env vars set manually in Render dashboard
-
-  # ── Celery Worker ──────────────────────────────────────────────────────
-  - type: worker
-    name: linkedin-ai-worker
-    runtime: docker
-    dockerfilePath: ./Dockerfile
-    dockerContext: .
-    dockerCommand: "uv run celery -A app.scheduler.celery_app worker --loglevel=info --concurrency=4 --queues=generation,publishing,default"
-    plan: starter
-    envVars:
-      - key: APP_ENV
-        value: production
-
-  # ── Celery Beat ────────────────────────────────────────────────────────
-  - type: worker
-    name: linkedin-ai-beat
-    runtime: docker
-    dockerfilePath: ./Dockerfile
-    dockerContext: .
-    dockerCommand: "uv run celery -A app.scheduler.celery_app beat --loglevel=info --scheduler celery.beat.PersistentScheduler --schedule /tmp/celerybeat-schedule"
-    plan: starter
-    envVars:
-      - key: APP_ENV
-        value: production
